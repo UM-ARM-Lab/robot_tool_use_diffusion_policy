@@ -37,6 +37,11 @@ from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
+from diffusion_policy.codecs.imagecodecs_numcodecs import (
+    register_codecs,
+    Jpeg2k
+)
+register_codecs()
 
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):
@@ -101,7 +106,6 @@ class VictorSimClient:
     
     def image_callback(self, msg: Image):
         self.latest_img = rnp.numpify(msg)
-        return 
 
     def wait_for_server(self, timeout: float = 10.0) -> bool:
         """Wait for server to be available and sending status."""
@@ -153,7 +157,7 @@ class VictorSimClient:
             left_gripper = self.client.left.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(left_gripper, self.client.device) # type: ignore
             # print(gripper_obs)
-            sim_obs = np.hstack([left_pos, gripper_obs, wrench])
+            sim_obs = np.hstack([left_pos, gripper_obs, wrench]) # type: ignore
             print("SIM OBS:\n", sim_obs)
             if left_pos is not None:
                 self.accumulator.put({
