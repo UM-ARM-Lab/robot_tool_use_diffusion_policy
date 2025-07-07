@@ -34,6 +34,11 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 import matplotlib.pyplot as plt
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
+from diffusion_policy.codecs.imagecodecs_numcodecs import (
+    register_codecs,
+    Jpeg2k
+)
+register_codecs()
 
 
 if __name__ == "__main__":
@@ -58,11 +63,21 @@ if __name__ == "__main__":
     # lower down_dims and lower action horizon
     # payload = torch.load(open("data/outputs/2025.06.24/14.12.24_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
     # lower down_dims and lower action horizon (since we only use 2 atm) and sample prediction type
-    payload = torch.load(open("data/outputs/2025.06.24/14.21.53_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
+    # payload = torch.load(open("data/outputs/2025.06.24/14.21.53_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
     # high down_dims and sample prediction BAD
     # payload = torch.load(open("data/outputs/2025.06.25/12.27.36_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)    
+    
+    # victor_img_data runs
+    # 3050 epochs high down_dims STATE ONLY
+    # payload = torch.load(open("data/outputs/2025.07.01/14.55.18_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # images
+    payload = torch.load(open("data/outputs/2025.07.02/11.17.56_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
+
+    use_images = "image" in cfg['shape_meta']
+
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
@@ -79,8 +94,9 @@ if __name__ == "__main__":
     # policy.eval()
     # zf = zarr.open("data/victor/victor_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
     # zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') 
-    zf = zarr.open("data/victor/victor_state_data_0624.zarr", mode='r') 
-
+    # zf = zarr.open("data/victor/victor_state_data_0624.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_img_data.zarr", mode='r') 
+    
     vic_acc = ObsAccumulator(2)
 
     for i in range(696):

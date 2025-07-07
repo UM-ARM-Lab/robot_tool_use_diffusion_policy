@@ -40,12 +40,16 @@ class VictorDataset(BaseImageDataset):
             "image"     : (1, 300, 486, 3)
         }
 
+        # self.replay_buffer = ReplayBuffer.copy_from_path(
+        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
+        #     chunks=chunk_map,
+        #     store=self.store,
+        #     compressors=compressor_map)
+
+        # TODO: split this off into a separate dataset loader to allow for both image and state versions
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=["robot_act", "robot_obs", 'image'],
-            chunks=chunk_map,
-            store=self.store,
-            compressors=compressor_map)
-
+            store=self.store)
 
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 
@@ -84,9 +88,6 @@ class VictorDataset(BaseImageDataset):
         data = {
             'action': self.replay_buffer['robot_act'],
             'robot_obs'   : self.replay_buffer['robot_obs']
-            # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
-            # 'wrench': self.replay_buffer['wrench'],#[...,:2]
-            # 'gripper_status': self.replay_buffer['gripper_status']
         }
         normalizer = LinearNormalizer()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)   # TODO unsure about keeping last_n_dims the same

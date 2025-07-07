@@ -4,7 +4,7 @@ checkpoint:
   save_last_snapshot: false
   topk:
     format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt
-    k: 10
+    k: 5
     mode: max
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
@@ -33,7 +33,7 @@ logging:
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - pusht_image
+  - victor_state
   - default
 multi_run:
   run_dir: victor_diffusion_state
@@ -41,7 +41,7 @@ multi_run:
 n_action_steps: 8
 n_latency_steps: 0
 n_obs_steps: 2
-name: train_diffusion_unet_hybrid
+name: victor_diffusion_state
 obs_as_global_cond: true
 optimizer:
   _target_: torch.optim.AdamW

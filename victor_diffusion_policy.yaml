@@ -8,9 +8,9 @@ checkpoint:
     mode: max
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
-  batch_size: 4
+  batch_size: 8
   num_workers: 8
-  persistent_workers: true
+  persistent_workers: false
   pin_memory: true
   shuffle: true
 dataset_obs_steps: 2
@@ -29,11 +29,11 @@ logging:
   id: null
   mode: online
   name: victor_diffusion
-  project: diffusion_policy_debug
+  project: victor_diffusion_policy
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - pusht_image
+  - victor_image
   - default
 multi_run:
   run_dir: victor_diffusion
@@ -41,7 +41,7 @@ multi_run:
 n_action_steps: 8
 n_latency_steps: 0
 n_obs_steps: 2
-name: train_diffusion_unet_hybrid
+name: victor_diffusion_image
 obs_as_global_cond: true
 optimizer:
   _target_: torch.optim.AdamW
@@ -60,12 +60,12 @@ policy:
   - 474
   diffusion_step_embed_dim: 128
   down_dims:
-  - 512
-  - 1024
-  - 2048
-  # - 128
-  # - 256
   # - 512
+  # - 1024
+  # - 2048
+  - 128
+  - 256
+  - 512
   eval_fixed_crop: true
   horizon: 16
   kernel_size: 5
@@ -136,7 +136,7 @@ task:
     pad_before: 0
     seed: 42
     val_ratio: 0.02
-    zarr_path: data/victor/victor_data.zarr/ds_processed.zarr.zip
+    zarr_path: data/victor/victor_img_data.zarr
   env_runner:
     _target_: diffusion_policy.env_runner.pusht_image_runner.PushTImageRunner   # never actually gets used
     fps: 10
@@ -174,7 +174,7 @@ task:
         type: rgb
 task_name: victor_diff
 training:
-  checkpoint_every: 50
+  checkpoint_every: 25
   debug: false
   device: cuda:0
   gradient_accumulate_every: 1
