@@ -47,9 +47,12 @@ class VictorDataset(BaseImageDataset):
         #     compressors=compressor_map)
 
         # TODO: split this off into a separate dataset loader to allow for both image and state versions
+        # self.replay_buffer = ReplayBuffer.copy_from_path(
+        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
+        #     store=self.store)
+        
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=["robot_act", "robot_obs", 'image'],
-            store=self.store)
+            zarr_path, keys=["robot_act", "robot_obs", 'image'])
 
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 

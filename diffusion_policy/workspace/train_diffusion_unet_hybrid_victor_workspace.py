@@ -293,7 +293,5 @@ def main(cfg):
     workspace = TrainDiffusionUnetHybridWorkspace(cfg)
     workspace.run()
 
-if __name__ == "__main__":  # crop_shape:
-  # - 1
-  # - 1
+if __name__ == "__main__":  
     main()

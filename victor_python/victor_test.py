@@ -51,27 +51,8 @@ if __name__ == "__main__":
     
 
     # load checkpoint
-    # payload = torch.load(open("data/outputs/2025.06.19/12.52.40_train_diffusion_unet_hybrid_victor_diff/checkpoints/epoch=0250-train_action_mse_error=0.000.ckpt", 'rb'), pickle_module=dill)
-    # payload = torch.load(open("data/outputs/2025.06.23/15.33.39_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # payload = torch.load(open("data/outputs/2025.06.24/12.24.58_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # payload = torch.load(open("data/outputs/2025.06.24/12.51.10_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # DDIM
-    # large
-    # payload = torch.load(open("data/outputs/2025.06.24/13.31.55_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # lower down_dims
-    # payload = torch.load(open("data/outputs/2025.06.24/13.58.39_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # lower down_dims and lower action horizon
-    # payload = torch.load(open("data/outputs/2025.06.24/14.12.24_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # lower down_dims and lower action horizon (since we only use 2 atm) and sample prediction type
-    # payload = torch.load(open("data/outputs/2025.06.24/14.21.53_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-    # high down_dims and sample prediction BAD
-    # payload = torch.load(open("data/outputs/2025.06.25/12.27.36_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)    
-    
-    # victor_img_data runs
-    # 3050 epochs high down_dims STATE ONLY
-    # payload = torch.load(open("data/outputs/2025.07.01/14.55.18_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    # images
-    payload = torch.load(open("data/outputs/2025.07.02/11.17.56_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # state only - low dim - validation
+    payload = torch.load(open("data/outputs/2025.07.10/11.50.13_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
@@ -91,13 +72,10 @@ if __name__ == "__main__":
 
     device = torch.device(device)
     policy.to(device)
-    # policy.eval()
-    # zf = zarr.open("data/victor/victor_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
-    # zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') 
-    # zf = zarr.open("data/victor/victor_state_data_0624.zarr", mode='r') 
-    zf = zarr.open("data/victor/victor_img_data.zarr", mode='r') 
+
+    zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
     
-    vic_acc = ObsAccumulator(2)
+    vic_acc = ObsAccumulator(8)
 
     for i in range(696):
         print('iter:', i)

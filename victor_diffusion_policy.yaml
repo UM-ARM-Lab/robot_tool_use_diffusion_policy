@@ -8,7 +8,7 @@ checkpoint:
     mode: max
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
-  batch_size: 8
+  batch_size: 4
   num_workers: 8
   persistent_workers: false
   pin_memory: true
@@ -131,12 +131,12 @@ task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
     horizon: 16
-    max_train_episodes: 1
+    max_train_episodes: 100
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.02
-    zarr_path: data/victor/victor_img_data.zarr
+    val_ratio: 0.2
+    zarr_path: data/victor/victor_data_07_10.zarr
   image_shape:
   - 3
   - 300
@@ -178,6 +178,6 @@ training:
 val_dataloader:
   batch_size: 4
   num_workers: 8
-  persistent_workers: false
+  persistent_workers: true
   pin_memory: true
   shuffle: false
