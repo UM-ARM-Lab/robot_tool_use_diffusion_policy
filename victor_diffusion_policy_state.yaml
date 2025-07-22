@@ -9,11 +9,11 @@ checkpoint:
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
   batch_size: 8
-  num_workers: 8
-  persistent_workers: true
+  num_workers: 4
+  persistent_workers: false
   pin_memory: true
   shuffle: true
-dataset_obs_steps: 8
+dataset_obs_steps: 16
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   inv_gamma: 1.0
@@ -40,7 +40,7 @@ multi_run:
   wandb_name_base: victor_diffusion_state
 n_action_steps: 8
 n_latency_steps: 0
-n_obs_steps: 8
+n_obs_steps: 16
 name: victor_diffusion_state
 obs_as_global_cond: true
 optimizer:
@@ -69,7 +69,7 @@ policy:
   # n_action_steps: 8
   n_action_steps: 8
   n_groups: 8
-  n_obs_steps: 8
+  n_obs_steps: 16
   # noise_scheduler:
   #   _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
   #   beta_end: 0.02
@@ -101,7 +101,7 @@ policy:
     obs: 
       robot_obs:
         shape:
-        - 21
+        - 15  # TODO was 21
         type: low_dim
 shape_meta:
   action:
@@ -110,7 +110,7 @@ shape_meta:
   obs:
     robot_obs:
       shape:
-      - 21
+      - 15  # TODO was 21
       type: low_dim
 task:
   dataset:
@@ -120,8 +120,8 @@ task:
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.2  # TODO experiment
-    zarr_path: data/victor/victor_data_07_10.zarr
+    val_ratio: 0.3  # TODO experiment
+    zarr_path: data/victor/victor_data_07_18_no_wrench.zarr # TODO not using the wrench data
   name: victor_diff
   shape_meta:
     action:
@@ -130,11 +130,11 @@ task:
     obs:
       robot_obs:
         shape:
-        - 21
+        - 15  # TODO was 21
         type: low_dim
 task_name: victor_diff
 training:
-  checkpoint_every: 25
+  checkpoint_every: 10
   debug: false
   device: cuda:0
   gradient_accumulate_every: 1
@@ -152,7 +152,7 @@ training:
   val_every: 5
 val_dataloader:
   batch_size: 8
-  num_workers: 8
-  persistent_workers: true
+  num_workers: 4
+  persistent_workers: false
   pin_memory: true
   shuffle: false

@@ -50,9 +50,19 @@ if __name__ == "__main__":
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
     
 
-    # load checkpoint
-    # state only - low dim - validation
-    payload = torch.load(open("data/outputs/2025.07.10/11.50.13_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    ### 15 EPISODES no wrench
+    # 30 epoch image + state
+    # payload = torch.load(open("data/outputs/2025.07.18/13.44.32_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # 250 epoch image + state OVERFIT
+    # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # 30 epoch image + state LOW VAL LOSS
+    # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/epoch=0030-train_action_mse_error=0.000.ckpt", "rb"), pickle_module=dill)
+
+    
+    # 30 epoch state only
+    payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # 60 epoch state only
+    # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
@@ -73,14 +83,14 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
-    zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
     
-    vic_acc = ObsAccumulator(8)
+    vic_acc = ObsAccumulator(16)
 
     for i in range(696):
         print('iter:', i)
         vic_acc.put({
-            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
+            # "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
             "robot_obs" : np.array(zf["data/robot_obs"][i])
         })
 

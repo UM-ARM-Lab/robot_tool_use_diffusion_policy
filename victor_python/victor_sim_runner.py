@@ -53,7 +53,7 @@ class VictorSimClient:
         self.__setup_subscribers()
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
-        self.accumulator = ObsAccumulator(2)
+        self.accumulator = ObsAccumulator(8)
 
         ### SETUP POLICY
         output_dir = "data/victor_eval_output"
@@ -61,23 +61,22 @@ class VictorSimClient:
         #     click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
         pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-        # load checkpoint
-        # payload = torch.load(open("data/outputs/2025.06.19/12.52.40_train_diffusion_unet_hybrid_victor_diff/checkpoints/epoch=0250-train_action_mse_error=0.000.ckpt", 'rb'), pickle_module=dill)
-        # payload = torch.load(open("data/outputs/2025.06.23/15.33.39_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # payload = torch.load(open("data/outputs/2025.06.24/12.24.58_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # payload = torch.load(open("data/outputs/2025.06.24/12.51.10_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # DDIM
+        ### 15 EPISODES no wrench
+        # 30 epoch image + state
+        # payload = torch.load(open("data/outputs/2025.07.18/13.44.32_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 250 epoch image + state OVERFIT
+        # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 30 epoch image + state LOW VAL LOSS
+        # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/epoch=0030-train_action_mse_error=0.000.ckpt", "rb"), pickle_module=dill)
+
         
-        # payload = torch.load(open("data/outputs/2025.06.24/13.31.55_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # lower down_dims
-        # payload = torch.load(open("data/outputs/2025.06.24/13.58.39_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # lower down_dims and lower action horizon (since we only use 2 atm) and sample prediction type
-        payload = torch.load(open("data/outputs/2025.06.24/14.21.53_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        # high down_dims and sample prediction BAD
-        # payload = torch.load(open("data/outputs/2025.06.25/12.27.36_train_diffusion_unet_hybrid_victor_diff/checkpoints/latest.ckpt", 'rb'), pickle_module=dill)
-        
+        # 30 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 60 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
         cfg = payload['cfg']
-        cfg.policy.num_inference_steps = 20
+        cfg.policy.num_inference_steps = 16
         cls = hydra.utils.get_class(cfg._target_)
         workspace = cls(cfg, output_dir=output_dir)
         workspace: BaseWorkspace
@@ -92,9 +91,8 @@ class VictorSimClient:
         self.device = torch.device(self.device)
         self.policy.to(self.device)
         # policy.eval()
-        # self.zf = zarr.open("data/victor/victor_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
-        # self.zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
-        self.zf = zarr.open("data/victor/victor_state_data_0624.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
+
+        self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
 
     # sets up subscribers that are needed for the model specifically
     def __setup_subscribers(self):
@@ -148,7 +146,7 @@ class VictorSimClient:
                 return
         
         # Control loop
-        for i in range(696):  
+        for i in range(716):  
             print('iter:', i)
             # Get observations from the sim
             left_pos = self.client.left.get_joint_positions() # type: ignore
@@ -165,11 +163,11 @@ class VictorSimClient:
             if left_pos is not None:
                 self.accumulator.put({
                     # "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
-                    "image": np.moveaxis(self.latest_img,-1,0),
+                    # "image": np.moveaxis(self.latest_img,-1,0),
                     # "robot_obs" : np.array(self.zf["data/robot_obs"][i])
                     "robot_obs" : sim_obs
                 })
-                # print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
+                print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
 
                 np_obs_dict = dict(self.accumulator.get())
 
@@ -194,7 +192,7 @@ class VictorSimClient:
                 self.client.left.send_joint_command(action[0][0][:7])
                 self.client.left.send_gripper_command(action[0][0][7:])
 
-                print("pred action:", action[0][0])
+                print("pred action:", action[0][0],"\n")
                 # print("true action:", self.zf["data/robot_act"][i])
 
         self.get_logger().info("Individual arm control example completed")
