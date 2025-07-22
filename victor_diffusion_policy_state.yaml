@@ -4,16 +4,17 @@ checkpoint:
   save_last_snapshot: false
   topk:
     format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt
-    k: 5
-    mode: max
-    monitor_key: train_action_mse_error # switched from mean error
+    k: 2
+    mode: min
+    # monitor_key: train_action_mse_error # switched from mean error
+    monitor_key: val_loss # switched from mean error
 dataloader:
-  batch_size: 8
+  batch_size: 4
   num_workers: 8
   persistent_workers: true
   pin_memory: true
   shuffle: true
-dataset_obs_steps: 8
+dataset_obs_steps: 2
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   inv_gamma: 1.0
@@ -22,7 +23,7 @@ ema:
   power: 0.75
   update_after_step: 0
 exp_name: default
-horizon: 16
+horizon: 8
 keypoint_visible_rate: 1.0
 logging:
   group: null
@@ -33,15 +34,15 @@ logging:
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - victor_state
+  - pusht_image
   - default
 multi_run:
   run_dir: victor_diffusion_state
   wandb_name_base: victor_diffusion_state
-n_action_steps: 8
+n_action_steps: 4
 n_latency_steps: 0
-n_obs_steps: 8
-name: victor_diffusion_state
+n_obs_steps: 1
+name: train_diffusion_unet_hybrid
 obs_as_global_cond: true
 optimizer:
   _target_: torch.optim.AdamW
@@ -55,21 +56,23 @@ past_action_visible: false
 policy:
   _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
   cond_predict_scale: true
+  # crop_shape:
+  # - 1
+  # - 1
   diffusion_step_embed_dim: 128
   down_dims:
-  # - 512
-  # - 1024
-  # - 2048
-  - 128
-  - 256
   - 512
+  - 1024
+  - 2048
+  # - 128
+  # - 256
+  # - 512
   eval_fixed_crop: true
-  horizon: 16
+  horizon: 8
   kernel_size: 5
-  # n_action_steps: 8
-  n_action_steps: 8
+  n_action_steps: 4
   n_groups: 8
-  n_obs_steps: 8
+  n_obs_steps: 1
   # noise_scheduler:
   #   _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
   #   beta_end: 0.02
@@ -98,11 +101,18 @@ policy:
     action:
       shape:
       - 11
+      # TODO!
     obs: 
       robot_obs:
         shape:
-        - 21
+        - 24
         type: low_dim
+      # image:
+      #   shape:
+      #   - 3
+      #   - 2
+      #   - 2
+      #   type: rgb
 shape_meta:
   action:
     shape:
@@ -110,18 +120,43 @@ shape_meta:
   obs:
     robot_obs:
       shape:
-      - 21
+      - 24
       type: low_dim
+    # image:
+    #   shape:
+    #   - 3
+    #   - 2
+    #   - 2
+    #   type: rgb
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
-    horizon: 16
-    max_train_episodes: 100
+    horizon: 8
+    max_train_episodes: 1
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.2  # TODO experiment
-    zarr_path: data/victor/victor_data_07_10.zarr
+    val_ratio: 0.05
+    zarr_path: data/victor/output_data_1.zarr
+  # env_runner:
+  #   _target_: diffusion_policy.env_runner.pusht_image_runner.PushTImageRunner   # never actually gets used
+  #   fps: 10
+  #   legacy_test: true
+  #   max_steps: 300
+  #   n_action_steps: 8
+  #   n_envs: null
+  #   n_obs_steps: 2
+  #   n_test: 50
+  #   n_test_vis: 4
+  #   n_train: 6
+  #   n_train_vis: 2
+  #   past_action: false
+  #   test_start_seed: 100000
+  #   train_start_seed: 0
+  # image_shape:
+  # - 3
+  # - 2
+  # - 2
   name: victor_diff
   shape_meta:
     action:
@@ -130,11 +165,17 @@ task:
     obs:
       robot_obs:
         shape:
-        - 21
+        - 24
         type: low_dim
+      # image:
+      #   shape:
+      #   - 3
+      #   - 2
+      #   - 2
+      #   type: rgb
 task_name: victor_diff
 training:
-  checkpoint_every: 25
+  checkpoint_every: 5
   debug: false
   device: cuda:0
   gradient_accumulate_every: 1
@@ -151,7 +192,7 @@ training:
   use_ema: true
   val_every: 5
 val_dataloader:
-  batch_size: 8
+  batch_size: 4
   num_workers: 8
   persistent_workers: true
   pin_memory: true

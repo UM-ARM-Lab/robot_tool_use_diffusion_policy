@@ -8,6 +8,9 @@ import tqdm
 import dill
 import math
 import wandb.sdk.data_types.video as wv
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 # from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
@@ -34,11 +37,6 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 import matplotlib.pyplot as plt
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
-from diffusion_policy.codecs.imagecodecs_numcodecs import (
-    register_codecs,
-    Jpeg2k
-)
-register_codecs()
 
 
 if __name__ == "__main__":
@@ -48,17 +46,14 @@ if __name__ == "__main__":
     # if os.path.exists(output_dir):
     #     click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
 
-    # load checkpoint
-    # state only - low dim - validation
-    payload = torch.load(open("data/outputs/2025.07.10/11.50.13_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # checkpoint_path = "./outputs/2025-07-07/14-36-26/checkpoints/latest.ckpt"
+    checkpoint_path = "./outputs/2025-07-21/13-08-30/checkpoints/epoch=0425-train_action_mse_error=0.032.ckpt"
 
+    output_dir = "./outputs/2025-07-21/13-08-30/"
+    payload = torch.load(open(checkpoint_path, 'rb'), pickle_module=dill)
     cfg = payload['cfg']
-    cfg.policy.num_inference_steps = 16
-
-    use_images = "image" in cfg['shape_meta']
-
+    # cfg.policy.num_inference_steps = 16
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
@@ -72,16 +67,24 @@ if __name__ == "__main__":
 
     device = torch.device(device)
     policy.to(device)
+    # policy.eval()
+    zf = zarr.open("./data/victor/dataset_2025-07-21_13-07-55.zarr.zip", mode='r') 
 
-    zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
-    
-    vic_acc = ObsAccumulator(8)
 
-    for i in range(696):
+    vic_acc = ObsAccumulator(2)
+    obs_keys = ['right_joint_positions', 'gripper_states',]
+
+    robot_obs = np.concatenate(
+        [np.array(zf[f"data/{key}"]) for key in obs_keys],
+        axis=-1).astype(np.float32)  # T, Do
+            
+
+
+    for i in range(191):
         print('iter:', i)
+
         vic_acc.put({
-            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
-            "robot_obs" : np.array(zf["data/robot_obs"][i])
+            key: np.array(zf[f"data/{key}"][i]) for key in obs_keys
         })
 
         # print(vic_acc.get())

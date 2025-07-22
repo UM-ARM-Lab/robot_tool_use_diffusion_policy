@@ -37,11 +37,6 @@ from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.codecs.imagecodecs_numcodecs import (
-    register_codecs,
-    Jpeg2k
-)
-register_codecs()
 
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):
@@ -50,7 +45,6 @@ class VictorSimClient:
         self.client = VictorPolicyClient('policy_example', enable_left = self.side == 'left',
                                             enable_right = self.side == 'right', device=device)
         # self.arm_node = self.client.left.node if self.side == 'left' else self.client.right.node # type: ignore
-        self.__setup_subscribers()
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
         self.accumulator = ObsAccumulator(2)
@@ -97,7 +91,7 @@ class VictorSimClient:
         self.zf = zarr.open("data/victor/victor_state_data_0624.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
 
     # sets up subscribers that are needed for the model specifically
-    def __setup_subscribers(self):
+    def _setup_subscribers(self):
         self.img_sub = self.client.create_subscription(
             Image,
             '/fake_image',
@@ -106,7 +100,8 @@ class VictorSimClient:
         )
     
     def image_callback(self, msg: Image):
-        self.latest_img = rnp.image.image_to_numpy(msg)
+        self.latest_img = rnp.numpify(msg)
+        return 
 
     def wait_for_server(self, timeout: float = 10.0) -> bool:
         """Wait for server to be available and sending status."""
@@ -150,7 +145,6 @@ class VictorSimClient:
         # Control loop
         for i in range(696):  
             print('iter:', i)
-            # Get observations from the sim
             left_pos = self.client.left.get_joint_positions() # type: ignore
             # print(left_pos)
             left_wrench = self.client.left.get_wrench() # type: ignore
@@ -159,17 +153,15 @@ class VictorSimClient:
             left_gripper = self.client.left.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(left_gripper, self.client.device) # type: ignore
             # print(gripper_obs)
-            sim_obs = np.hstack([left_pos, gripper_obs, wrench]) # type: ignore
+            sim_obs = np.hstack([left_pos, gripper_obs, wrench])
             print("SIM OBS:\n", sim_obs)
-
             if left_pos is not None:
                 self.accumulator.put({
-                    # "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
-                    "image": np.moveaxis(self.latest_img,-1,0),
+                    "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
                     # "robot_obs" : np.array(self.zf["data/robot_obs"][i])
                     "robot_obs" : sim_obs
                 })
-                # print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
+                print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
 
                 np_obs_dict = dict(self.accumulator.get())
 
@@ -195,7 +187,7 @@ class VictorSimClient:
                 self.client.left.send_gripper_command(action[0][0][7:])
 
                 print("pred action:", action[0][0])
-                # print("true action:", self.zf["data/robot_act"][i])
+                print("true action:", self.zf["data/robot_act"][i])
 
         self.get_logger().info("Individual arm control example completed")
 

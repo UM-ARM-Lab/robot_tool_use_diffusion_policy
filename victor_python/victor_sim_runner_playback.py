@@ -31,11 +31,6 @@ from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.codecs.imagecodecs_numcodecs import (
-    register_codecs,
-    Jpeg2k
-)
-register_codecs()
 
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):

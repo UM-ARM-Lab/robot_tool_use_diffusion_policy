@@ -21,6 +21,7 @@ import numpy as np
 import shutil
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_unet_hybrid_image_policy import DiffusionUnetHybridImagePolicy
+# from diffusion_policy.dataset.victor_dataset import VictorDataset
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 # from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -204,24 +205,27 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                 train_loss = np.mean(train_losses)
                 step_log['train_loss'] = train_loss
 
+                # TODO NO VALIDATION FOR NOW
+
                 # ========= eval for this epoch ==========
                 policy = self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
                 policy.eval()
 
-                # run rollout
+                # # run rollout
                 # if (self.epoch % cfg.training.rollout_every) == 0:
                 #     runner_log = env_runner.run(policy)
                 #     # log all
                 #     step_log.update(runner_log)
 
-                #run validation
+                # run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
                         val_losses = list()
                         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                            
                             for batch_idx, batch in enumerate(tepoch):
                                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
                                 loss = self.model.compute_loss(batch)
@@ -293,5 +297,5 @@ def main(cfg):
     workspace = TrainDiffusionUnetHybridWorkspace(cfg)
     workspace.run()
 
-if __name__ == "__main__":  
+if __name__ == "__main__":
     main()

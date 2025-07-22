@@ -28,41 +28,38 @@ class VictorDataset(BaseImageDataset):
         super().__init__()
         self.store = zarr.MemoryStore()
 
-        compressor_map = {
-            "robot_act" : Blosc2(),
-            "robot_obs" : Blosc2(),
-            "image"     : Jpeg2k(level=50)
-        }
+        # compressor_map = {
+        #     "robot_act" : Blosc2(),
+        #     "robot_obs" : Blosc2(),
+        #     "image"     : Jpeg2k(level=50)
+        # }
 
-        chunk_map = {
-            "robot_act" : (1000, 11),
-            "robot_obs" : (1000, 21),
-            "image"     : (1, 300, 486, 3)
-        }
+        # chunk_map = {
+        #     "robot_act" : (100, 11),
+        #     "robot_obs" : (100, 21),
+        #     "image"     : (10, 512, 512, 4)
+        # }
 
-        # self.replay_buffer = ReplayBuffer.copy_from_path(
-        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
-        #     chunks=chunk_map,
-        #     store=self.store,
-        #     compressors=compressor_map)
-
-        # TODO: split this off into a separate dataset loader to allow for both image and state versions
-        # self.replay_buffer = ReplayBuffer.copy_from_path(
-        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
-        #     store=self.store)
-        
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=["robot_act", "robot_obs", 'image'])
+            zarr_path, keys=["robot_act", "robot_obs", 'image'],
+            # chunks=chunk_map,
+            store=self.store,)
+            # compressors=compressor_map)
+        
+        print(f"Loaded replay buffer with {self.replay_buffer}")
 
+        
+
+        # Get the mask for validation episodes
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 
             val_ratio=val_ratio,
             seed=seed)
-        train_mask = ~val_mask
-        train_mask = downsample_mask(
-            mask=train_mask, 
-            max_n=max_train_episodes, 
-            seed=seed)
+        train_mask = ~val_mask 
+        # train_mask = downsample_mask(
+        #     mask=train_mask, 
+        #     max_n=max_train_episodes, 
+        #     seed=seed)
 
         self.sampler = SequenceSampler(
             replay_buffer=self.replay_buffer, 
@@ -91,6 +88,9 @@ class VictorDataset(BaseImageDataset):
         data = {
             'action': self.replay_buffer['robot_act'],
             'robot_obs'   : self.replay_buffer['robot_obs']
+            # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
+            # 'wrench': self.replay_buffer['wrench'],#[...,:2]
+            # 'gripper_status': self.replay_buffer['gripper_status']
         }
         normalizer = LinearNormalizer()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)   # TODO unsure about keeping last_n_dims the same
