@@ -61,6 +61,9 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         # 60 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
+        # NEW OBS CONFIG TODO
         payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         cfg = payload['cfg']
@@ -82,7 +85,8 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
         # self.zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
         # self.zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
 
         print(self.zf["meta/epsisode_name"])
     
@@ -130,7 +134,7 @@ class VictorSimClient:
                 return
         
         # Control loop
-        for i in range(10535, 11193):  #789
+        for i in range(789):  #789
             print('iter:', i)
             right_pos = self.client.right.get_joint_positions() # type: ignore
             if right_pos is not None:

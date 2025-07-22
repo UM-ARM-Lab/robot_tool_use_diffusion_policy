@@ -5,7 +5,7 @@ checkpoint:
   topk:
     format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt
     k: 5
-    mode: min
+    mode: max
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
   batch_size: 8
@@ -29,11 +29,11 @@ logging:
   id: null
   mode: online
   name: victor_diffusion
-  project: diffusion_policy_debug
+  project: victor_diffusion_policy
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - pusht_image
+  - victor_image
   - default
 multi_run:
   run_dir: victor_diffusion
@@ -60,12 +60,12 @@ policy:
   - 474
   diffusion_step_embed_dim: 128
   down_dims:
-  - 512
-  - 1024
-  - 2048
-  # - 128
-  # - 256
   # - 512
+  # - 1024
+  # - 2048
+  - 128
+  - 256
+  - 512
   eval_fixed_crop: true
   horizon: 16
   kernel_size: 5
@@ -104,13 +104,13 @@ policy:
     obs: 
       robot_obs:
         shape:
-        - 15  # TODO was 21
+        - 22  # TODO was 21
         type: low_dim
       image:
         shape:
-        - 4
-        - 512 
-        - 512
+        - 3
+        - 300
+        - 486
         type: rgb
 shape_meta:
   action:
@@ -119,28 +119,28 @@ shape_meta:
   obs:
     robot_obs:
       shape:
-      - 15  # TODO was 21
+      - 22  # TODO was 21
       type: low_dim
     image:
       shape:
-      - 4
-      - 512
-      - 512
+      - 3
+      - 300
+      - 486
       type: rgb
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
     horizon: 16
-    max_train_episodes: 1
+    max_train_episodes: 100
     pad_after: 0
     pad_before: 0
     seed: 42
     val_ratio: 0.3
-    zarr_path: data/victor/victor_data_07_18_no_wrench.zarr # TODO not using the wrench data
+    zarr_path: data/victor/victor_data_07_22_no_wrench.zarr # TODO not using the wrench data
   image_shape:
-  - 4
-  - 512
-  - 512
+  - 3
+  - 300
+  - 486
   name: victor_diff
   shape_meta:
     action:
@@ -149,13 +149,13 @@ task:
     obs:
       robot_obs:
         shape:
-        - 15  # TODO was 21
+        - 22  # TODO was 21
         type: low_dim
       image:
         shape:
-        - 4
-        - 512
-        - 512
+        - 3
+        - 300
+        - 486
         type: rgb
 task_name: victor_diff
 training:

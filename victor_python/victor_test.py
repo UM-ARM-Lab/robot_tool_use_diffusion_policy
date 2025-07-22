@@ -58,9 +58,14 @@ if __name__ == "__main__":
 
     
     # 30 epoch state only
-    payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
     # 60 epoch state only
     # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
+
+    # NEW OBS CONFIG TODO
+    payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
 
     cfg = payload['cfg']
     # cfg.policy.num_inference_steps = 16
@@ -78,7 +83,7 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
-    zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
     
     vic_acc = ObsAccumulator(16)
 

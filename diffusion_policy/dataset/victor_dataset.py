@@ -40,12 +40,14 @@ class VictorDataset(BaseImageDataset):
         #     "image"     : (10, 512, 512, 4)
         # }
 
+        # self.replay_buffer = ReplayBuffer.copy_from_path(
+        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
+        #     # chunks=chunk_map,
+        #     store=self.store,)
+        #     # compressors=compressor_map)
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=["robot_act", "robot_obs", 'image'],
-            # chunks=chunk_map,
-            store=self.store,)
-            # compressors=compressor_map)
-        
+            zarr_path, keys=["robot_act", "robot_obs", 'image']
+        )
         print(f"Loaded replay buffer with {self.replay_buffer}")
 
         

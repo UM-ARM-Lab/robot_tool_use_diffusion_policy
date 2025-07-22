@@ -68,6 +68,9 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 60 epoch state only
         # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        
+        # NEW OBS CONFIG TODO
+        payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         cfg = payload['cfg']
         cfg.policy.num_inference_steps = 16
@@ -86,7 +89,7 @@ class VictorSimClient:
         self.policy.to(self.device)
         # policy.eval()
 
-        self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
 
     # sets up subscribers that are needed for the model specifically
     def _setup_subscribers(self):
@@ -137,23 +140,20 @@ class VictorSimClient:
         # Individual arm controller switching using new centralized API
         if self.client.left:
             if not self.client.set_controller('left', 'impedance_controller', timeout=10.0):
-                self.get_logger().error("Failed   num_workers: 4
-  persistent_workers: false
-to switch left arm controller")
+                self.get_logger().error("Failed to switch left arm controller")
                 return
         
+        previous_act = np.zeros(11)
         # Control loop
-        for i in range(716):  
+        for i in range(789):  
             print('iter:', i)
             left_pos = self.client.left.get_joint_positions() # type: ignore
             # print(left_pos)
-            left_wrench = self.client.left.get_wrench() # type: ignore
-            wrench = wrench_to_tensor(left_wrench, self.client.device) # type: ignore
             # print(wrench)
             left_gripper = self.client.left.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(left_gripper, self.client.device) # type: ignore
             # print(gripper_obs)
-            sim_obs = np.hstack([left_pos, gripper_obs, wrench])
+            sim_obs = np.hstack([previous_act, left_pos, gripper_obs])
             print("SIM OBS:\n", sim_obs)
             if left_pos is not None:
                 self.accumulator.put({
@@ -162,7 +162,6 @@ to switch left arm controller")
                     # "robot_obs" : np.array(self.zf["data/robot_obs"][i])
                     "robot_obs" : sim_obs
                 })
-                print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
                 print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
 
                 np_obs_dict = dict(self.accumulator.get())
@@ -187,6 +186,7 @@ to switch left arm controller")
                 action = np_action_dict['action']
                 self.client.left.send_joint_command(action[0][0][:7])
                 self.client.left.send_gripper_command(action[0][0][7:])
+                previous_act = action[0][0]
 
                 print("pred action:", action[0][0],"\n")
                 # print("true action:", self.zf["data/robot_act"][i])
