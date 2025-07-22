@@ -8,6 +8,9 @@ import tqdm
 import dill
 import math
 import wandb.sdk.data_types.video as wv
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 # from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
@@ -34,11 +37,6 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 import matplotlib.pyplot as plt
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
-from diffusion_policy.codecs.imagecodecs_numcodecs import (
-    register_codecs,
-    Jpeg2k
-)
-register_codecs()
 
 
 if __name__ == "__main__":
@@ -65,10 +63,7 @@ if __name__ == "__main__":
     # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
-    cfg.policy.num_inference_steps = 16
-
-    use_images = "image" in cfg['shape_meta']
-
+    # cfg.policy.num_inference_steps = 16
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
@@ -89,6 +84,7 @@ if __name__ == "__main__":
 
     for i in range(696):
         print('iter:', i)
+
         vic_acc.put({
             # "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
             "robot_obs" : np.array(zf["data/robot_obs"][i])

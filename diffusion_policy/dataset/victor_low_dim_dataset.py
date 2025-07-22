@@ -2,6 +2,7 @@ from typing import Dict
 import torch
 import numpy as np
 import copy
+import zarr
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.sampler import (
@@ -9,21 +10,29 @@ from diffusion_policy.common.sampler import (
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.common.normalize_util import get_image_range_normalizer
+from diffusion_policy.codecs.imagecodecs_numcodecs import Jpeg2k, register_codecs, Blosc2, Jpeg
 
-class PushTImageDataset(BaseImageDataset):
+register_codecs()
+
+class VictorLowdimDataset(BaseImageDataset):
     def __init__(self,
             zarr_path, 
             horizon=1,
             pad_before=0,
             pad_after=0,
-            seed=42,
+            seed=0,
             val_ratio=0.0,
-            max_train_episodes=None
+            max_train_episodes=None,
+            act_keys=['robot_act'],
+            obs_keys=['right_joint_positions','gripper_states',],
             ):
         
         super().__init__()
+
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=['img', 'state', 'action'])
+            zarr_path, keys=act_keys + obs_keys,)
+         
+
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 
             val_ratio=val_ratio,
@@ -39,7 +48,11 @@ class PushTImageDataset(BaseImageDataset):
             sequence_length=horizon,
             pad_before=pad_before, 
             pad_after=pad_after,
-            episode_mask=train_mask)
+            episode_mask=train_mask
+            )
+        self.keys = act_keys + obs_keys
+        self.act_keys = act_keys
+        self.obs_keys = obs_keys
         self.train_mask = train_mask
         self.horizon = horizon
         self.pad_before = pad_before
@@ -58,29 +71,35 @@ class PushTImageDataset(BaseImageDataset):
         return val_set
 
     def get_normalizer(self, mode='limits', **kwargs):
-        data = {
-            'action': self.replay_buffer['action'],
-            # NOTE for future reference: it grabs the first 2 columns, which correspond to agent_x, agent_y
-            'agent_pos': self.replay_buffer['state'][...,:2]    
+        # obs_dic = {}
+        # for obj_key in self.obs_keys:
+            # obs_dic[obj_key] = self.replay_buffer[obj_key]
+        # obs_np = np.concatenate([np.array(self.replay_buffer[key]) for key in self.obs_keys], axis=-1).astype(np.float32)
+
+        data_dic = {
+            key : np.array(self.replay_buffer[key]) for key in self.obs_keys
         }
+        data_dic['action'] = np.array(self.replay_buffer[self.act_keys[0]])  # Assuming single action key
+ 
         normalizer = LinearNormalizer()
-        normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
-        normalizer['image'] = get_image_range_normalizer()
+        normalizer.fit(data=data_dic, last_n_dims=1, mode=mode, **kwargs)
+        # normalizer['image'] = get_image_range_normalizer()
         return normalizer
+
 
     def __len__(self) -> int:
         return len(self.sampler)
 
+
     def _sample_to_data(self, sample):
-        agent_pos = sample['state'][:,:2].astype(np.float32) # (agent_posx2, block_posex3)
-        image = np.moveaxis(sample['img'],-1,1)/255
+        # obs_np = np.concatenate([sample[key].astype(np.float32) for key in self.obs_keys], axis=-1).astype(np.float32)
+
+        obs_dic = { key: sample[key].astype(np.float32) for key in self.obs_keys}
+        action_np = sample[self.act_keys[0]].astype(np.float32)
 
         data = {
-            'obs': {
-                'image': image, # T, 3, 96, 96
-                'agent_pos': agent_pos, # T, 2
-            },
-            'action': sample['action'].astype(np.float32) # T, 7
+            'obs': obs_dic,  # 
+            'action': action_np # T, 2
         }
         return data
     
@@ -92,17 +111,9 @@ class PushTImageDataset(BaseImageDataset):
 
 
 def test():
-    import os
-    import zarr
-    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/pusht/pusht_cchi_v7_replay.zarr')
-    print(zarr.open_group(zarr_path).tree())
-    dataset = PushTImageDataset(zarr_path, horizon=16)
-    # print(dataset.replay_buffer.data)
-    # from matplotlib import pyplot as plt
-    # normalizer = dataset.get_normalizer()
-    # nactions = normalizer['action'].normalize(dataset.replay_buffer['action'])
-    # diff = np.diff(nactions, axis=0)
-    # dists = np.linalg.norm(np.diff(nactions, axis=0), axis=-1)
-
+    pass
+ 
+ 
 if __name__ == "__main__":
+    import os
     test()

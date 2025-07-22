@@ -5,7 +5,7 @@ checkpoint:
   topk:
     format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt
     k: 5
-    mode: max
+    mode: min
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
   batch_size: 8
@@ -29,11 +29,11 @@ logging:
   id: null
   mode: online
   name: victor_diffusion
-  project: victor_diffusion_policy
+  project: diffusion_policy_debug
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - victor_image
+  - pusht_image
   - default
 multi_run:
   run_dir: victor_diffusion
@@ -60,12 +60,12 @@ policy:
   - 474
   diffusion_step_embed_dim: 128
   down_dims:
-  # - 512
-  # - 1024
-  # - 2048
-  - 128
-  - 256
   - 512
+  - 1024
+  - 2048
+  # - 128
+  # - 256
+  # - 512
   eval_fixed_crop: true
   horizon: 16
   kernel_size: 5
@@ -108,9 +108,9 @@ policy:
         type: low_dim
       image:
         shape:
-        - 3
-        - 300
-        - 486
+        - 4
+        - 512 
+        - 512
         type: rgb
 shape_meta:
   action:
@@ -123,24 +123,24 @@ shape_meta:
       type: low_dim
     image:
       shape:
-      - 3
-      - 300
-      - 486
+      - 4
+      - 512
+      - 512
       type: rgb
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
     horizon: 16
-    max_train_episodes: 100
+    max_train_episodes: 1
     pad_after: 0
     pad_before: 0
     seed: 42
     val_ratio: 0.3
     zarr_path: data/victor/victor_data_07_18_no_wrench.zarr # TODO not using the wrench data
   image_shape:
-  - 3
-  - 300
-  - 486
+  - 4
+  - 512
+  - 512
   name: victor_diff
   shape_meta:
     action:
@@ -153,9 +153,9 @@ task:
         type: low_dim
       image:
         shape:
-        - 3
-        - 300
-        - 486
+        - 4
+        - 512
+        - 512
         type: rgb
 task_name: victor_diff
 training:
