@@ -33,7 +33,7 @@ from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
 class VictorSimClient:
-    def __init__(self, device: Union[str, torch.device] = 'cuda:0'):
+    def __init__(self, device: Union[str, torch.device] = 'cpu'):
         # Initialize client with both arms enabled and specified device
         self.client = VictorPolicyClient('policy_example', enable_left=False, enable_right=True, device=device)
         self.get_logger = self.client.get_logger
@@ -64,10 +64,16 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         # NEW OBS CONFIG TODO
-        payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 50 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 210 epoch image + state
+        # payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0180-train_action_mse_error=0.0000083.ckpt", "rb"), pickle_module=dill)
+        # 100 epoch image + state + epsilon
+        payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
 
-        cfg = payload['cfg']
-        cfg.policy.num_inference_steps = 8
+        self.cfg = payload['cfg']
+        cfg = self.cfg
+        cfg.policy.num_inference_steps = 10
         cls = hydra.utils.get_class(cfg._target_)
         workspace = cls(cfg, output_dir=output_dir)
         workspace: BaseWorkspace
@@ -88,7 +94,7 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
         self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
 
-        print(self.zf["meta/epsisode_name"])
+        print(self.zf["meta/episode_name"])
     
     def wait_for_server(self, timeout: float = 10.0) -> bool:
         """Wait for server to be available and sending status."""
@@ -134,12 +140,12 @@ class VictorSimClient:
                 return
         
         # Control loop
-        for i in range(789):  #789
+        for i in range(0, 789, self.cfg.n_action_steps):  #789 10535, 11193
             print('iter:', i)
             right_pos = self.client.right.get_joint_positions() # type: ignore
             if right_pos is not None:
                 self.accumulator.put({
-                    "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
+                    "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
                     "robot_obs" : np.array(self.zf["data/robot_obs"][i])
                 })
 
@@ -165,11 +171,26 @@ class VictorSimClient:
                     lambda x: x.detach().to('cpu').numpy())
                 
                 action = np_action_dict['action']
+                print(action.shape)
+                # print(np_action_dict)
+                # for i in range(len(action)):
+                # for j in range(self.cfg.n_action_steps):
+                #     print("executing", j)
+                #     self.client.right.send_joint_command(action[0][j][:7])
+                #     self.client.right.send_gripper_command(action[0][j][7:])
+                #     time.sleep(0.05)  # wait for the action to be executed
+
                 self.client.right.send_joint_command(action[0][0][:7])
                 self.client.right.send_gripper_command(action[0][0][7:])
+                # action = np.array(self.zf["data/robot_act"][i])
+                # print(action[:7])
+                # self.client.right.send_joint_command(action[:7])
+                # self.client.right.send_gripper_command(action[7:])
 
-                print("pred action:", action[0][0])
+                print("action:", action[0][0])
+                print("pred action:", np_action_dict['action_pred'][0][0])
                 print("true action:", self.zf["data/robot_act"][i])
+                # time.sleep(0.1)
 
         self.get_logger().info("Individual arm control example completed")
 
@@ -184,12 +205,12 @@ def main(args=None):
 
         # Initialize example with specified configuration
         victor_sim = VictorSimClient()
-        victor_sim.client = VictorPolicyClient(
-            'policy_example', 
-            enable_left=enable_left, 
-            enable_right=enable_right, 
-            device=victor_sim.device
-        )
+        # victor_sim.client = VictorPolicyClient(
+        #     'policy_example', 
+        #     enable_left=enable_left, 
+        #     enable_right=enable_right, 
+        #     device=victor_sim.device
+        # )
         victor_sim.get_logger = victor_sim.client.get_logger
         
         # Start ROS spinning in a separate thread

@@ -27,7 +27,7 @@ from victor_hardware_interfaces.msg import (
 )
 
 import ros2_numpy as rnp
-
+import cv2
 from victor_python.victor_utils import wrench_to_tensor, gripper_status_to_tensor
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
@@ -41,13 +41,15 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):
         # Initialize client with both arms enabled and specified device
-        self.side = 'left'
+        self.side = 'right'
         self.client = VictorPolicyClient('policy_example', enable_left = self.side == 'left',
                                             enable_right = self.side == 'right', device=device)
+        self._setup_subscribers()
+        self.latest_img = None
         # self.arm_node = self.client.left.node if self.side == 'left' else self.client.right.node # type: ignore
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
-        self.accumulator = ObsAccumulator(8)
+        self.accumulator = ObsAccumulator(16)
 
         ### SETUP POLICY
         output_dir = "data/victor_eval_output"
@@ -57,7 +59,7 @@ class VictorSimClient:
 
         ### 15 EPISODES no wrench
         # 30 epoch image + state
-        # payload = torch.load(open("data/outputs/2025.07.18/13.44.32_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("datImagea/outputs/2025.07.18/13.44.3episode_ends2_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 250 epoch image + state OVERFIT
         # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 30 epoch image + state LOW VAL LOSS
@@ -70,10 +72,15 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         
         # NEW OBS CONFIG TODO
-        payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 50 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 210 epoch image + state
+        # payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0180-train_action_mse_error=0.0000083.ckpt", "rb"), pickle_module=dill)
+        # 100 epoch image + state + epsilon
+        payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
 
         cfg = payload['cfg']
-        cfg.policy.num_inference_steps = 16
+        cfg.policy.num_inference_steps = 100
         cls = hydra.utils.get_class(cfg._target_)
         workspace = cls(cfg, output_dir=output_dir)
         workspace: BaseWorkspace
@@ -93,15 +100,26 @@ class VictorSimClient:
 
     # sets up subscribers that are needed for the model specifically
     def _setup_subscribers(self):
-        self.img_sub = self.client.create_subscription(
+        self.client.img_sub = self.client.create_subscription(
             Image,
-            '/fake_image',
+            '/zivid/rgb',
             self.image_callback,
             self.client.reliable_qos
         )
     
     def image_callback(self, msg: Image):
+        # print("Image received")
+        # if self.latest_img is not None:
+        #     print("Image already received, skipping")
+        #     return
         self.latest_img = rnp.numpify(msg)
+        # print(self.latest_img.shape)
+        # print(self.latest_img)
+        # cv2.namedWindow("Latest Image", cv2.WINDOW_NORMAL)
+        # self.latest_img = self.latest_img[...,::-1]
+        # cv2.imshow("Latest Image", cv2.cvtColor(self.latest_img, cv2.COLOR_BGR2RGB))
+        # cv2.imshow("Latest Image", self.latest_img)
+        # cv2.waitKey(1)  # Add small delay to allow window to update
         return 
 
     def wait_for_server(self, timeout: float = 10.0) -> bool:
@@ -138,28 +156,47 @@ class VictorSimClient:
             return
         
         # Individual arm controller switching using new centralized API
-        if self.client.left:
-            if not self.client.set_controller('left', 'impedance_controller', timeout=10.0):
+        # if self.client.left:
+        #     if not self.client.set_controller('left', 'impedance_controller', timeout=10.0):
+        #         self.get_logger().error("Failed to switch left arm controller")
+        #         return
+        print("s", self.client.right)
+        if self.client.right:
+            if not self.client.set_controller('right', 'impedance_controller', timeout=10.0):
                 self.get_logger().error("Failed to switch left arm controller")
                 return
         
-        previous_act = np.zeros(11)
+        # previous_act = np.array(self.zf["data/robot_act"][0])
+        print("OLD previous_act:", self.zf["data/robot_act"][0])
+        previous_act = None
         # Control loop
-        for i in range(789):  
+        for i in range(789000):  
             print('iter:', i)
-            left_pos = self.client.left.get_joint_positions() # type: ignore
-            # print(left_pos)
+
+            right_pos = self.client.right.get_joint_positions() # type: ignore
+            right_gripper = self.client.right.get_gripper_status() # type: ignore
+            gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
+            
+            if previous_act is None:
+                previous_act = np.hstack([right_pos, gripper_obs[0], gripper_obs[1], gripper_obs[2], gripper_obs[3]])
+                # previous_act = np.hstack([right_pos, 0, 0, 0, 0])
+                print("NEW previous_act:", previous_act)
+                continue
             # print(wrench)
-            left_gripper = self.client.left.get_gripper_status() # type: ignore
-            gripper_obs = gripper_status_to_tensor(left_gripper, self.client.device) # type: ignore
-            # print(gripper_obs)
-            sim_obs = np.hstack([previous_act, left_pos, gripper_obs])
+            # right_pos = self.client.right.get_joint_positions() # type: ignore
+            # right_gripper = self.client.right.get_gripper_status() # type: ignore
+            gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
+            sim_obs = np.hstack([previous_act, right_pos, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
+            print(sim_obs.shape)
             print("SIM OBS:\n", sim_obs)
-            if left_pos is not None:
+            # time.sleep(1)  # simulate some delay
+            # continue
+            if right_pos is not None:
                 self.accumulator.put({
                     # "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
                     # "image": np.moveaxis(self.latest_img,-1,0),
                     # "robot_obs" : np.array(self.zf["data/robot_obs"][i])
+                    "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
                     "robot_obs" : sim_obs
                 })
                 print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
@@ -184,8 +221,8 @@ class VictorSimClient:
                     lambda x: x.detach().to('cpu').numpy())
                 
                 action = np_action_dict['action']
-                self.client.left.send_joint_command(action[0][0][:7])
-                self.client.left.send_gripper_command(action[0][0][7:])
+                self.client.right.send_joint_command(action[0][0][:7])
+                self.client.right.send_gripper_command(action[0][0][7:])
                 previous_act = action[0][0]
 
                 print("pred action:", action[0][0],"\n")
@@ -200,16 +237,16 @@ def main(args=None):
 
     victor_sim = None
     try:
-        enable_left, enable_right = True, False
+        enable_left, enable_right = False, True
 
         # Initialize example with specified configuration
         victor_sim = VictorSimClient()
-        victor_sim.client = VictorPolicyClient(
-            'policy_example', 
-            enable_left=enable_left, 
-            enable_right=enable_right, 
-            device=victor_sim.device
-        )
+        # victor_sim.client = VictorPolicyClient(
+        #     'policy_example', 
+        #     enable_left=enable_left, 
+        #     enable_right=enable_right, 
+        #     device=victor_sim.device
+        # )
         victor_sim.get_logger = victor_sim.client.get_logger
         
         # Start ROS spinning in a separate thread

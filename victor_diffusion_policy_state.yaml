@@ -3,9 +3,9 @@ checkpoint:
   save_last_ckpt: true
   save_last_snapshot: false
   topk:
-    format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.3f}.ckpt
+    format_str: epoch={epoch:04d}-train_action_mse_error={train_action_mse_error:.7f}.ckpt
     k: 5
-    mode: max
+    mode: min
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
   batch_size: 8
@@ -22,7 +22,7 @@ ema:
   power: 0.75
   update_after_step: 0
 exp_name: default
-horizon: 16
+horizon: 8
 keypoint_visible_rate: 1.0
 logging:
   group: null
@@ -38,7 +38,7 @@ logging:
 multi_run:
   run_dir: victor_diffusion_state
   wandb_name_base: victor_diffusion_state
-n_action_steps: 8
+n_action_steps: 1
 n_latency_steps: 0
 n_obs_steps: 16
 name: victor_diffusion_state
@@ -57,17 +57,17 @@ policy:
   cond_predict_scale: true
   diffusion_step_embed_dim: 128
   down_dims:
-  # - 512
-  # - 1024
-  # - 2048
-  - 128
-  - 256
   - 512
+  - 1024
+  - 2048
+  # - 128
+  # - 256
+  # - 512
   eval_fixed_crop: true
-  horizon: 16
+  horizon: 8
   kernel_size: 5
   # n_action_steps: 8
-  n_action_steps: 8
+  n_action_steps: 1
   n_groups: 8
   n_obs_steps: 16
   # noise_scheduler:
@@ -90,7 +90,7 @@ policy:
     clip_sample: True
     set_alpha_to_one: True
     steps_offset: 0
-    prediction_type: sample # or sample # or epsilon
+    prediction_type: epsilon # or sample # or epsilon
   num_inference_steps: 100
   obs_as_global_cond: true
   obs_encoder_group_norm: true
@@ -115,7 +115,7 @@ shape_meta:
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
-    horizon: 16
+    horizon: 8
     max_train_episodes: 100
     pad_after: 0
     pad_before: 0
@@ -134,7 +134,7 @@ task:
         type: low_dim
 task_name: victor_diff
 training:
-  checkpoint_every: 10
+  checkpoint_every: 5
   debug: false
   device: cuda:0
   gradient_accumulate_every: 1

@@ -205,7 +205,6 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                 train_loss = np.mean(train_losses)
                 step_log['train_loss'] = train_loss
 
-                # TODO NO VALIDATION FOR NOW
 
                 # ========= eval for this epoch ==========
                 policy = self.model

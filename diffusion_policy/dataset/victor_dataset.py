@@ -74,6 +74,8 @@ class VictorDataset(BaseImageDataset):
         self.pad_before = pad_before
         self.pad_after = pad_after
 
+        print("HORIZON:", self.horizon)
+
     def get_validation_dataset(self):
         val_set = copy.copy(self)
         val_set.sampler = SequenceSampler(
@@ -134,10 +136,10 @@ class VictorDataset(BaseImageDataset):
 
 def test():
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr')
-    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_img_data.zarr/ds_processed.zarr.zip')
+    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data_07_22_no_wrench.zarr')
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr/ds_processed.zarr.zip')
-    dataset = VictorDataset(zarr_path, horizon=16)
-    # print(dataset.replay_buffer.data)
+    dataset = VictorDataset(zarr_path, horizon=8)
+    print(dataset.replay_buffer.data)
     print(dataset.__getitem__(0))
     print(dataset.replay_buffer.episode_ends[:])
     print(dataset.replay_buffer.n_episodes)

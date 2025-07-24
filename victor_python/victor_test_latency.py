@@ -66,11 +66,13 @@ if __name__ == "__main__":
     # NEW OBS CONFIG TODO
     # 50 epoch state only
     # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
+    # 210 epoch image + state
+    payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0210-train_action_mse_error=0.0000075.ckpt", "rb"), pickle_module=dill)
 
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
+    cfg.policy.n_latency_steps = 4
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
@@ -93,7 +95,7 @@ if __name__ == "__main__":
         print('iter:', i)
 
         vic_acc.put({
-            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
+            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
             "robot_obs" : np.array(zf["data/robot_obs"][i])
         })
 
@@ -123,11 +125,9 @@ if __name__ == "__main__":
             lambda x: x.detach().to('cpu').numpy())
 
         action = np_action_dict['action']
-        # print(np_action_dict["action"], np_action_dict["action_pred"])
         print(action.shape)
-        print(action[0][0][:7], "\t", action[0][0][7:])  # first 7 are joint positions, last 3 are gripper positions
         print("pred action:", action[0][0])
         print("true action:", zf["data/robot_act"][i])
         print("delta:", action[0][0] - zf["data/robot_act"][i])
         print("percentage off:", np.abs((action[0][0] - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
-        print("absolute delta sum:", np.sum((action[0][0] - zf["data/robot_act"][i])**2))
+        print("absolute delta sum:", np.sum(np.abs((action[0][0] - zf["data/robot_act"][i]))))
