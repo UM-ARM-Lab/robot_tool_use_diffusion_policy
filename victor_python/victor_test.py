@@ -66,7 +66,10 @@ if __name__ == "__main__":
     # NEW OBS CONFIG TODO
     # 50 epoch state only
     # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
+    # 2620 epoch state only
+    # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
+    # 555 epoch state only -> SINGLE OBS STEP
+    payload = torch.load(open("data/outputs/2025.07.25/16.14.19_victor_diffusion_state_micro_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
 
     cfg = payload['cfg']
@@ -85,11 +88,11 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
-    zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
     
-    vic_acc = ObsAccumulator(16)
+    vic_acc = ObsAccumulator(1)
 
-    for i in range(10535, 11193):    #10535, 11193
+    for i in range(672):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({

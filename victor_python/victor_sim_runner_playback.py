@@ -32,14 +32,18 @@ from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
+from data_utils import SmartDict, store_h5_dict
+from victor_python.victor_utils import wrench_to_tensor, gripper_status_to_tensor
+
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):
         # Initialize client with both arms enabled and specified device
         self.client = VictorPolicyClient('policy_example', enable_left=False, enable_right=True, device=device)
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
-        self.accumulator = ObsAccumulator(16)
+        self.accumulator = ObsAccumulator(1)
 
+        self.data_dict = SmartDict()
         ### SETUP POLICY
         output_dir = "data/victor_eval_output"
         # if os.path.exists(output_dir):
@@ -69,7 +73,12 @@ class VictorSimClient:
         # 210 epoch image + state
         # payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0180-train_action_mse_error=0.0000083.ckpt", "rb"), pickle_module=dill)
         # 100 epoch image + state + epsilon
-        payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
+        # 2620 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
+        # 555 epoch state only -> SINGLE OBS STEP
+        payload = torch.load(open("data/outputs/2025.07.25/12.16.22_victor_diffusion_state_victor_diff/checkpoints/epoch=0555-train_action_mse_error=0.0001751.ckpt", "rb"), pickle_module=dill)
+
 
         self.cfg = payload['cfg']
         cfg = self.cfg
@@ -92,7 +101,8 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
         # self.zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
 
         print(self.zf["meta/episode_name"])
     
@@ -139,10 +149,25 @@ class VictorSimClient:
                 self.get_logger().error("Failed to switch right arm controller")
                 return
         
+        previous_act = self.zf["data/robot_act"][0]
         # Control loop
-        for i in range(0, 789, self.cfg.n_action_steps):  #789 10535, 11193
+        for i in range(0, 672):  #789 10535, 11193
             print('iter:', i)
+            # get observations
             right_pos = self.client.right.get_joint_positions() # type: ignore
+            rms = self.client.right.get_motion_status().commanded_joint_position
+            right_motion_status = np.array([
+                rms.joint_1, rms.joint_2, rms.joint_3, 
+                rms.joint_4, rms.joint_5, rms.joint_6, 
+                rms.joint_7
+            ])
+
+            # print(self.client.right.get_motion_status().commanded_joint_position.get_fields_and_field_types())
+            right_gripper = self.client.right.get_gripper_status() # type: ignore
+            gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
+            sim_obs = np.hstack([previous_act, right_motion_status, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
+            self.data_dict.add('robot_obs', sim_obs)
+
             if right_pos is not None:
                 self.accumulator.put({
                     "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
@@ -172,6 +197,10 @@ class VictorSimClient:
                 
                 action = np_action_dict['action']
                 print(action.shape)
+                
+                self.data_dict.add('robot_act', action[0][0])  # store the action in the data_dict
+                previous_act = action[0][0] # save the previous action for the next iteration
+
                 # print(np_action_dict)
                 # for i in range(len(action)):
                 # for j in range(self.cfg.n_action_steps):
@@ -182,18 +211,23 @@ class VictorSimClient:
 
                 self.client.right.send_joint_command(action[0][0][:7])
                 self.client.right.send_gripper_command(action[0][0][7:])
+
                 # action = np.array(self.zf["data/robot_act"][i])
-                # print(action[:7])
+                # previous_act = action # save the previous action for the next iteration
+                # # print(action[:7])
                 # self.client.right.send_joint_command(action[:7])
                 # self.client.right.send_gripper_command(action[7:])
-
-                print("action:", action[0][0])
-                print("pred action:", np_action_dict['action_pred'][0][0])
-                print("true action:", self.zf["data/robot_act"][i])
                 # time.sleep(0.1)
 
-        self.get_logger().info("Individual arm control example completed")
 
+
+
+                # print("action:", action[0][0])
+                # print("pred action:", np_action_dict['action_pred'][0][0])
+                # print("true action:", self.zf["data/robot_act"][i])
+
+        self.get_logger().info("Individual arm control example completed")
+        store_h5_dict("data/victor/victor_playback_data.h5", self.data_dict)
         
 def main(args=None):
     # Initialize ROS with remaining args

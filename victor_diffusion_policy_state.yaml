@@ -22,7 +22,7 @@ ema:
   power: 0.75
   update_after_step: 0
 exp_name: default
-horizon: 8
+horizon: 16
 keypoint_visible_rate: 1.0
 logging:
   group: null
@@ -49,22 +49,22 @@ optimizer:
   - 0.95
   - 0.999
   eps: 1.0e-08
-  lr: 0.0001
-  weight_decay: 1.0e-06
+  lr: 0.0005
+  weight_decay: 5.0e-06
 past_action_visible: false
 policy:
   _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
   cond_predict_scale: true
   diffusion_step_embed_dim: 128
   down_dims:
-  - 512
-  - 1024
-  - 2048
-  # - 128
-  # - 256
   # - 512
+  # - 1024
+  # - 2048
+  - 128
+  - 256
+  - 512
   eval_fixed_crop: true
-  horizon: 8
+  horizon: 16
   kernel_size: 5
   # n_action_steps: 8
   n_action_steps: 1
@@ -115,13 +115,13 @@ shape_meta:
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
-    horizon: 8
+    horizon: 16
     max_train_episodes: 100
     pad_after: 0
     pad_before: 0
     seed: 42
     val_ratio: 0.3  # TODO experiment
-    zarr_path: data/victor/victor_data_07_22_no_wrench.zarr # TODO not using the wrench data
+    zarr_path: data/victor/victor_data_07_24_single_trajectory.zarr # TODO not using the wrench data
   name: victor_diff
   shape_meta:
     action:

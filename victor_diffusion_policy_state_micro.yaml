@@ -8,12 +8,12 @@ checkpoint:
     mode: min
     monitor_key: train_action_mse_error # switched from mean error
 dataloader:
-  batch_size: 4
+  batch_size: 8
   num_workers: 4
   persistent_workers: false
   pin_memory: true
   shuffle: true
-dataset_obs_steps: 16
+dataset_obs_steps: 1
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
   inv_gamma: 1.0
@@ -22,26 +22,26 @@ ema:
   power: 0.75
   update_after_step: 0
 exp_name: default
-horizon: 16
+horizon: 4
 keypoint_visible_rate: 1.0
 logging:
   group: null
   id: null
   mode: online
-  name: victor_diffusion
-  project: victor_diffusion_policy
+  name: victor_diffusion_state_micro
+  project: victor_diffusion_policy_state_micro
   resume: true
   tags:
   - train_diffusion_unet_hybrid
-  - victor_image
-  - default
+  - victor_state
+  - micro
 multi_run:
-  run_dir: victor_diffusion
-  wandb_name_base: victor_diffusion
+  run_dir: victor_diffusion_state_micro
+  wandb_name_base: victor_diffusion_state_micro
 n_action_steps: 1
 n_latency_steps: 0
-n_obs_steps: 16
-name: victor_diffusion_image
+n_obs_steps: 1
+name: victor_diffusion_state_micro
 obs_as_global_cond: true
 optimizer:
   _target_: torch.optim.AdamW
@@ -49,15 +49,12 @@ optimizer:
   - 0.95
   - 0.999
   eps: 1.0e-08
-  lr: 0.0001
-  weight_decay: 1.0e-06
+  lr: 0.0005
+  weight_decay: 5.0e-06
 past_action_visible: false
 policy:
   _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
   cond_predict_scale: true
-  crop_shape:
-  - 275
-  - 461
   diffusion_step_embed_dim: 128
   down_dims:
   # - 512
@@ -67,11 +64,12 @@ policy:
   - 256
   - 512
   eval_fixed_crop: true
-  horizon: 16
+  horizon: 4
   kernel_size: 5
+  # n_action_steps: 8
   n_action_steps: 1
-  n_groups: 8
-  n_obs_steps: 16
+  # n_groups: 8
+  n_obs_steps: 1
   # noise_scheduler:
   #   _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
   #   beta_end: 0.02
@@ -100,18 +98,11 @@ policy:
     action:
       shape:
       - 11
-      # TODO!
     obs: 
       robot_obs:
         shape:
         - 22  # TODO was 21
         type: low_dim
-      image:
-        shape:
-        - 3
-        - 300
-        - 486
-        type: rgb
 shape_meta:
   action:
     shape:
@@ -121,26 +112,16 @@ shape_meta:
       shape:
       - 22  # TODO was 21
       type: low_dim
-    image:
-      shape:
-      - 3
-      - 300
-      - 486
-      type: rgb
 task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
-    horizon: 16
+    horizon: 4
     max_train_episodes: 100
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.3
+    val_ratio: 0.3  # TODO experiment
     zarr_path: data/victor/victor_data_07_24_single_trajectory.zarr # TODO not using the wrench data
-  image_shape:
-  - 3
-  - 300
-  - 486
   name: victor_diff
   shape_meta:
     action:
@@ -151,12 +132,6 @@ task:
         shape:
         - 22  # TODO was 21
         type: low_dim
-      image:
-        shape:
-        - 3
-        - 300
-        - 486
-        type: rgb
 task_name: victor_diff
 training:
   checkpoint_every: 5
@@ -174,10 +149,10 @@ training:
   seed: 42
   tqdm_interval_sec: 1.0
   use_ema: true
-  val_every: 2
+  val_every: 5
 val_dataloader:
-  batch_size: 4
-  num_workers: 4 
+  batch_size: 8
+  num_workers: 4
   persistent_workers: false
   pin_memory: true
   shuffle: false

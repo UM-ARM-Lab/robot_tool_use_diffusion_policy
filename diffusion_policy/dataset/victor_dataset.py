@@ -48,6 +48,7 @@ class VictorDataset(BaseImageDataset):
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=["robot_act", "robot_obs", 'image']
         )
+        print(self.replay_buffer.keys())
         print(f"Loaded replay buffer with {self.replay_buffer}")
 
         
@@ -136,9 +137,9 @@ class VictorDataset(BaseImageDataset):
 
 def test():
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr')
-    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data_07_22_no_wrench.zarr')
+    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data_07_24_single_trajectory.zarr')
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr/ds_processed.zarr.zip')
-    dataset = VictorDataset(zarr_path, horizon=8)
+    dataset = VictorDataset(zarr_path, horizon=1)
     print(dataset.replay_buffer.data)
     print(dataset.__getitem__(0))
     print(dataset.replay_buffer.episode_ends[:])

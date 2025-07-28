@@ -10,6 +10,8 @@ class ObsAccumulator:
         self.To = To
 
     def put(self, data: Dict[str, np.ndarray]):
+        # TODO GET RID OF THIS
+        # self.obs_dq = collections.deque(maxlen=self.To)  # stores the last To observations
         self.obs_dq.append(data)
         # fill the dq with the initial data point at the start
         while len(self.obs_dq) < self.To:   

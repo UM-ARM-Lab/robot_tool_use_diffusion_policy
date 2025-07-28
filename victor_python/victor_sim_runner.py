@@ -49,7 +49,7 @@ class VictorSimClient:
         # self.arm_node = self.client.left.node if self.side == 'left' else self.client.right.node # type: ignore
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
-        self.accumulator = ObsAccumulator(16)
+        self.accumulator = ObsAccumulator(1)
 
         ### SETUP POLICY
         output_dir = "data/victor_eval_output"
@@ -77,7 +77,11 @@ class VictorSimClient:
         # 210 epoch image + state
         # payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0180-train_action_mse_error=0.0000083.ckpt", "rb"), pickle_module=dill)
         # 100 epoch image + state + epsilon
-        payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.24/15.45.20_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 2620 epoch state only
+        # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
+        # 555 epoch state only -> SINGLE OBS STEP
+        payload = torch.load(open("data/outputs/2025.07.25/12.16.22_victor_diffusion_state_victor_diff/checkpoints/epoch=0555-train_action_mse_error=0.0001751.ckpt", "rb"), pickle_module=dill)
 
         cfg = payload['cfg']
         cfg.policy.num_inference_steps = 100
@@ -96,7 +100,8 @@ class VictorSimClient:
         self.policy.to(self.device)
         # policy.eval()
 
-        self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
 
     # sets up subscribers that are needed for the model specifically
     def _setup_subscribers(self):
@@ -168,12 +173,25 @@ class VictorSimClient:
         
         # previous_act = np.array(self.zf["data/robot_act"][0])
         print("OLD previous_act:", self.zf["data/robot_act"][0])
-        previous_act = None
+        action = self.zf["data/robot_act"][0]
+        previous_act = action
+        self.client.right.send_joint_command(action[:7])
+        self.client.right.send_gripper_command(action[7:])
+        time.sleep(1)  # wait for the action to be sent
+        # previous_act = None
         # Control loop
         for i in range(789000):  
             print('iter:', i)
 
             right_pos = self.client.right.get_joint_positions() # type: ignore
+            rms = self.client.right.get_motion_status().commanded_joint_position
+            right_motion_status = np.array([
+                rms.joint_1, rms.joint_2, rms.joint_3, 
+                rms.joint_4, rms.joint_5, rms.joint_6, 
+                rms.joint_7
+            ])
+
+            # print(self.client.right.get_motion_status().commanded_joint_position.get_fields_and_field_types())
             right_gripper = self.client.right.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
             
@@ -186,17 +204,17 @@ class VictorSimClient:
             # right_pos = self.client.right.get_joint_positions() # type: ignore
             # right_gripper = self.client.right.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
-            sim_obs = np.hstack([previous_act, right_pos, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
+            sim_obs = np.hstack([previous_act, right_motion_status, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
             print(sim_obs.shape)
             print("SIM OBS:\n", sim_obs)
             # time.sleep(1)  # simulate some delay
             # continue
             if right_pos is not None:
                 self.accumulator.put({
-                    # "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
+                    "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
                     # "image": np.moveaxis(self.latest_img,-1,0),
                     # "robot_obs" : np.array(self.zf["data/robot_obs"][i])
-                    "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
+                    # "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
                     "robot_obs" : sim_obs
                 })
                 print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
@@ -226,7 +244,7 @@ class VictorSimClient:
                 previous_act = action[0][0]
 
                 print("pred action:", action[0][0],"\n")
-                # print("true action:", self.zf["data/robot_act"][i])
+                print("true action:", self.zf["data/robot_act"][i])
 
         self.get_logger().info("Individual arm control example completed")
 
