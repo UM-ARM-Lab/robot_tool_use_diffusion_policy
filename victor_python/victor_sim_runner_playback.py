@@ -38,10 +38,12 @@ from victor_python.victor_utils import wrench_to_tensor, gripper_status_to_tenso
 class VictorSimClient:
     def __init__(self, device: Union[str, torch.device] = 'cpu'):
         # Initialize client with both arms enabled and specified device
-        self.client = VictorPolicyClient('policy_example', enable_left=False, enable_right=True, device=device)
+        self.side = 'right'
+        self.client = VictorPolicyClient('policy_example', enable_left = self.side == 'left',
+                                            enable_right = self.side == 'right', device=device)
+        self.arm = self.client.right if self.side == 'right' else self.client.left
         self.get_logger = self.client.get_logger
         # self.device = torch.device(device)    # use model device
-        self.accumulator = ObsAccumulator(1)
 
         self.data_dict = SmartDict()
         ### SETUP POLICY
@@ -75,9 +77,9 @@ class VictorSimClient:
         # 100 epoch image + state + epsilon
         # payload = torch.load(open("data/outputs/2025.07.23/17.25.58_victor_diffusion_image_victor_diff/checkpoints/epoch=0100-train_action_mse_error=0.0002452.ckpt", "rb"), pickle_module=dill)
         # 2620 epoch state only
-        # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
+        payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
         # 555 epoch state only -> SINGLE OBS STEP
-        payload = torch.load(open("data/outputs/2025.07.25/12.16.22_victor_diffusion_state_victor_diff/checkpoints/epoch=0555-train_action_mse_error=0.0001751.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.25/12.16.22_victor_diffusion_state_victor_diff/checkpoints/epoch=0555-train_action_mse_error=0.0001751.ckpt", "rb"), pickle_module=dill)
 
 
         self.cfg = payload['cfg']
@@ -96,11 +98,10 @@ class VictorSimClient:
 
         self.device = torch.device(self.device)
         self.policy.to(self.device)
-        # policy.eval()
-        # self.zf = zarr.open("data/victor/victor_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
-        # self.zf = zarr.open("data/victor/victor_state_data.zarr", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
-        # self.zf = zarr.open("data/victor/victor_data_07_10.zarr", mode='r') 
-        # self.zf = zarr.open("data/victor/victor_data_07_18_no_wrench.zarr", mode='r') 
+
+        # setup accumulator
+        self.accumulator = ObsAccumulator(cfg.policy.n_obs_steps)
+      
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
         self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
 
@@ -139,31 +140,28 @@ class VictorSimClient:
             self.get_logger().error("Failed to connect to server")
             return
         
-        # Individual arm controller switching using new centralized API
-        if self.client.left:
-            if not self.client.set_controller('left', 'impedance_controller', timeout=10.0):
-                self.get_logger().error("Failed to switch left arm controller")
-                return
-        if self.client.right:
-            if not self.client.set_controller('right', 'impedance_controller', timeout=10.0):
-                self.get_logger().error("Failed to switch right arm controller")
+        # individual arm control
+        if self.arm:
+            if not self.client.set_controller(self.side, 'impedance_controller', timeout=10.0):
+                self.get_logger().error(f"Failed to switch {self.side} arm controller")
                 return
         
+        print(self.client.__getattribute__(self.side))
         previous_act = self.zf["data/robot_act"][0]
         # Control loop
         for i in range(0, 672):  #789 10535, 11193
             print('iter:', i)
             # get observations
-            right_pos = self.client.right.get_joint_positions() # type: ignore
-            rms = self.client.right.get_motion_status().commanded_joint_position
+            right_pos = self.arm.get_joint_positions() # type: ignore
+            rms = self.arm.get_motion_status().commanded_joint_position
             right_motion_status = np.array([
                 rms.joint_1, rms.joint_2, rms.joint_3, 
                 rms.joint_4, rms.joint_5, rms.joint_6, 
                 rms.joint_7
             ])
 
-            # print(self.client.right.get_motion_status().commanded_joint_position.get_fields_and_field_types())
-            right_gripper = self.client.right.get_gripper_status() # type: ignore
+            # print(self.arm.get_motion_status().commanded_joint_position.get_fields_and_field_types())
+            right_gripper = self.arm.get_gripper_status() # type: ignore
             gripper_obs = gripper_status_to_tensor(right_gripper, self.client.device) # type: ignore
             sim_obs = np.hstack([previous_act, right_motion_status, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
             self.data_dict.add('robot_obs', sim_obs)
@@ -205,26 +203,26 @@ class VictorSimClient:
                 # for i in range(len(action)):
                 # for j in range(self.cfg.n_action_steps):
                 #     print("executing", j)
-                #     self.client.right.send_joint_command(action[0][j][:7])
-                #     self.client.right.send_gripper_command(action[0][j][7:])
+                #     self.arm.send_joint_command(action[0][j][:7])
+                #     self.arm.send_gripper_command(action[0][j][7:])
                 #     time.sleep(0.05)  # wait for the action to be executed
 
-                self.client.right.send_joint_command(action[0][0][:7])
-                self.client.right.send_gripper_command(action[0][0][7:])
+                self.arm.send_joint_command(action[0][0][:7])
+                self.arm.send_gripper_command(action[0][0][7:])
 
                 # action = np.array(self.zf["data/robot_act"][i])
                 # previous_act = action # save the previous action for the next iteration
                 # # print(action[:7])
-                # self.client.right.send_joint_command(action[:7])
-                # self.client.right.send_gripper_command(action[7:])
+                # self.arm.send_joint_command(action[:7])
+                # self.arm.send_gripper_command(action[7:])
                 # time.sleep(0.1)
 
 
 
 
-                # print("action:", action[0][0])
+                print("action:", action[0][0])
                 # print("pred action:", np_action_dict['action_pred'][0][0])
-                # print("true action:", self.zf["data/robot_act"][i])
+                print("true action:", self.zf["data/robot_act"][i])
 
         self.get_logger().info("Individual arm control example completed")
         store_h5_dict("data/victor/victor_playback_data.h5", self.data_dict)

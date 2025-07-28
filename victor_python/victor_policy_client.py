@@ -131,6 +131,22 @@ class VictorArmPolicyClient:
             self.wrench_callback,
             self.high_freq_qos
         )
+
+        # Joint commands subscriber - no callback group
+        self.joint_cmd_sub = self.node.create_subscription(
+            JointValueQuantity,
+            f'/victor_policy_bridge/{self.side}/joint_command',
+            self.joint_command_callback,
+            self.high_freq_qos
+        )
+        
+        # Gripper commands subscriber - no callback group
+        self.gripper_cmd_sub = self.node.create_subscription(
+            Robotiq3FingerCommand,
+            f'/victor_policy_bridge/{self.side}/gripper_command',
+            self.gripper_command_callback,
+            self.high_freq_qos
+        )
     
     def controller_state_callback(self, msg: String):
         """Handle controller state updates - only store data."""
@@ -153,6 +169,14 @@ class VictorArmPolicyClient:
         """Handle wrench updates - only store data."""
         with self.status_lock:
             self.latest_wrench = msg
+
+    def joint_command_callback(self, msg: JointValueQuantity):
+        with self.status_lock:
+            self.latest_joint_command = msg
+
+    def gripper_command_callback(self, msg: Robotiq3FingerCommand):
+        with self.status_lock:
+            self.latest_gripper_command = msg
 
     def _convert_to_list(self, data: Union[List[float], np.ndarray, torch.Tensor], 
                         expected_dim: int, data_name: str) -> List[float]:
@@ -283,6 +307,32 @@ class VictorArmPolicyClient:
                     jvq.joint_5, jvq.joint_6, jvq.joint_7]
         return torch.tensor(positions, dtype=torch.float32, device=self.device)
     
+    # returns a tensor of joint commands
+    def get_joint_commands(self) -> Optional[torch.Tensor]:
+        """Get latest joint command."""
+        joint_cmd = self.latest_joint_command
+        if joint_cmd is None:
+            return None
+        
+        positions = [joint_cmd.joint_1, joint_cmd.joint_2, joint_cmd.joint_3, 
+                     joint_cmd.joint_4, joint_cmd.joint_5, joint_cmd.joint_6, joint_cmd.joint_7]
+        return torch.tensor(positions, dtype=torch.float32, device=self.device)
+    
+    # returns a tensor of gripper commands
+    def get_gripper_commands(self) -> Optional[torch.Tensor]:
+        """Get latest gripper command."""
+        gripper_cmd = self.latest_gripper_command
+        if gripper_cmd is None:
+            return None
+        
+        commands = [
+            gripper_cmd.finger_a_command.position,
+            gripper_cmd.finger_b_command.position,
+            gripper_cmd.finger_c_command.position,
+            gripper_cmd.scissor_command.position
+        ]
+        return torch.tensor(commands, dtype=torch.float32, device=self.device)
+
     def get_joint_velocities(self) -> Optional[torch.Tensor]:
         """Get current joint velocities as torch tensor."""
         status = self.get_motion_status()
