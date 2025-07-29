@@ -32,7 +32,7 @@ from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
-from data_utils import SmartDict, store_h5_dict
+from data_utils import SmartDict, store_h5_dict, store_zarr_dict
 from victor_python.victor_utils import wrench_to_tensor, gripper_status_to_tensor
 
 class VictorSimClient:
@@ -85,7 +85,9 @@ class VictorSimClient:
         # NEW NEW EA OBS CONFIG
         # payload = torch.load(open("data/outputs/2025.07.28/16.03.40_victor_diffusion_state_victor_diff/checkpoints/epoch=0150-train_action_mse_error=0.0001035.ckpt", "rb"), pickle_module=dill)
         # 2025 epochs with new ea config + epsilon
-        payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 3000 epochs + sample
+        payload = torch.load(open("data/outputs/2025.07.28/21.28.14_victor_diffusion_state_victor_diff/checkpoints/epoch=2900-train_action_mse_error=0.0000000.ckpt", "rb"), pickle_module=dill)
 
 
         self.cfg = payload['cfg']
@@ -267,11 +269,13 @@ def main(args=None):
         
         victor_sim.run_trajectory_inference_example()
         store_h5_dict("data/victor/victor_playback_data.h5", victor_sim.data_dict)
+        store_zarr_dict("data/victor/victor_playback_data.zarr.zip", victor_sim.data_dict)
 
     except KeyboardInterrupt:
         if victor_sim:
             victor_sim.get_logger().info("Interrupted by user")
             store_h5_dict("data/victor/victor_playback_data.h5", victor_sim.data_dict)
+            store_zarr_dict("data/victor/victor_playback_data.zarr.zip", victor_sim.data_dict)
     except Exception as e:
         print(f"Client error: {e}")
         if victor_sim:

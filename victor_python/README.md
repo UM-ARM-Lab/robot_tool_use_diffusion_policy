@@ -28,3 +28,9 @@ NOTE: there is also the **wrench_data_window**, which stores *upsampled* wrench 
 # Testing
 Currently there is no robust testing pipeline, instead use victor_test.py to compare the model's inference against the input it was trained on
 
+# Checkpoints
+
+**End Affector Observations:**
+- Single Trajectory, 150 epochs, state only, epsilon: ```"data/outputs/2025.07.28/16.03.40_victor_diffusion_state_victor_diff/checkpoints/epoch=0150-train_action_mse_error=0.0001035.ckpt"```
+- Single Trajectory, 2025 epochs, state only, epsilon: ```"data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt"```
+- Single Trajectory, 2900 epochs, state only, sample: ```"data/outputs/2025.07.28/21.28.14_victor_diffusion_state_victor_diff/checkpoints/epoch=2900-train_action_mse_error=0.0000000.ckpt"```

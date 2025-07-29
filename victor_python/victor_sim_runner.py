@@ -63,8 +63,13 @@ class VictorSimClient:
         
         # LOAD CHECKPOINT
         # 2620 epoch state only
-        payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
         
+        # NEW NEW EA OBS CONFIG
+        # payload = torch.load(open("data/outputs/2025.07.28/16.03.40_victor_diffusion_state_victor_diff/checkpoints/epoch=0150-train_action_mse_error=0.0001035.ckpt", "rb"), pickle_module=dill)
+        # 2025 epochs with new ea config + epsilon
+        payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
         cfg = payload['cfg']
         cfg.policy.num_inference_steps = 10
         cls = hydra.utils.get_class(cfg._target_)
@@ -90,8 +95,9 @@ class VictorSimClient:
         )
         
         self.previous_act = None
-        
-        self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
+    
+        self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
 
     # sets up subscribers that are needed for the model specifically
@@ -236,7 +242,7 @@ class VictorSimClient:
             self.data_dict.add('robot_act', action[0][0])  # store the action in the data_dict
 
             print("pred action:", action[0][0],"\n")
-            print("true action:", self.zf["data/robot_act"][i])
+            print("true action:", self.zf["data/robot_act_ea"][i])
 
         self.get_logger().info("Individual arm control example completed")
 
