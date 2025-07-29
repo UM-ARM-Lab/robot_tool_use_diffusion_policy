@@ -69,7 +69,10 @@ if __name__ == "__main__":
     # 2620 epoch state only
     # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
     # 555 epoch state only -> SINGLE OBS STEP
-    payload = torch.load(open("data/outputs/2025.07.25/16.14.19_victor_diffusion_state_micro_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # payload = torch.load(open("data/outputs/2025.07.25/16.14.19_victor_diffusion_state_micro_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        
+    # NEW NEW EA OBS CONFIG
+    payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
 
     cfg = payload['cfg']
@@ -88,16 +91,17 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
-    zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
-    
-    vic_acc = ObsAccumulator(1)
+    # zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
+
+    vic_acc = ObsAccumulator(16)
 
     for i in range(672):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({
             "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
-            "robot_obs" : np.array(zf["data/robot_obs"][i])
+            "robot_obs" : np.array(zf["data/robot_obs_ea"][i])
         })
 
         # print(vic_acc.get())
@@ -125,12 +129,12 @@ if __name__ == "__main__":
         np_action_dict = dict_apply(action_dict,
             lambda x: x.detach().to('cpu').numpy())
 
-        action = np_action_dict['action']
+        action = np_action_dict['action_pred']
         # print(np_action_dict["action"], np_action_dict["action_pred"])
         print(action.shape)
         print(action[0][0][:7], "\t", action[0][0][7:])  # first 7 are joint positions, last 3 are gripper positions
         print("pred action:", action[0][0])
-        print("true action:", zf["data/robot_act"][i])
-        print("delta:", action[0][0] - zf["data/robot_act"][i])
-        print("percentage off:", np.abs((action[0][0] - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
-        print("absolute delta sum:", np.sum((action[0][0] - zf["data/robot_act"][i])**2))
+        print("true action:", zf["data/robot_act_ea"][i])
+        print("delta:", action[0][0] - zf["data/robot_act_ea"][i])
+        print("percentage off:", np.abs((action[0][0] - zf["data/robot_act_ea"][i])) / zf["data/robot_act_ea"][i])
+        print("absolute delta sum:", np.sum((action[0][0] - zf["data/robot_act_ea"][i])**2))

@@ -38,7 +38,7 @@ logging:
 multi_run:
   run_dir: victor_diffusion_state
   wandb_name_base: victor_diffusion_state
-n_action_steps: 1
+n_action_steps: 4
 n_latency_steps: 0
 n_obs_steps: 16
 name: victor_diffusion_state
@@ -49,8 +49,8 @@ optimizer:
   - 0.95
   - 0.999
   eps: 1.0e-08
-  lr: 0.0005
-  weight_decay: 5.0e-06
+  lr: 0.0001
+  weight_decay: 1.0e-06
 past_action_visible: false
 policy:
   _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
@@ -67,7 +67,7 @@ policy:
   horizon: 16
   kernel_size: 5
   # n_action_steps: 8
-  n_action_steps: 1
+  n_action_steps: 4
   n_groups: 8
   n_obs_steps: 16
   # noise_scheduler:
@@ -90,7 +90,7 @@ policy:
     clip_sample: True
     set_alpha_to_one: True
     steps_offset: 0
-    prediction_type: epsilon # or sample # or epsilon
+    prediction_type: sample # or sample # or epsilon
   num_inference_steps: 100
   obs_as_global_cond: true
   obs_encoder_group_norm: true
