@@ -35,10 +35,11 @@ logging:
   - train_diffusion_unet_hybrid
   - victor_image
   - default
+  - joint_angles
 multi_run:
   run_dir: victor_diffusion
   wandb_name_base: victor_diffusion
-n_action_steps: 1
+n_action_steps: 4
 n_latency_steps: 0
 n_obs_steps: 16
 name: victor_diffusion_image
@@ -69,7 +70,7 @@ policy:
   eval_fixed_crop: true
   horizon: 16
   kernel_size: 5
-  n_action_steps: 1
+  n_action_steps: 4
   n_groups: 8
   n_obs_steps: 16
   # noise_scheduler:
@@ -92,7 +93,7 @@ policy:
     clip_sample: True
     set_alpha_to_one: True
     steps_offset: 0
-    prediction_type: epsilon # or sample # or epsilon
+    prediction_type: sample # or sample # or epsilon
   num_inference_steps: 100
   obs_as_global_cond: true
   obs_encoder_group_norm: true
@@ -136,7 +137,7 @@ task:
     pad_before: 0
     seed: 42
     val_ratio: 0.3
-    zarr_path: data/victor/victor_data_07_24_single_trajectory.zarr # TODO not using the wrench data
+    zarr_path: data/victor/victor_data_07_29_all_ep_ea.zarr # TODO not using the wrench data
   image_shape:
   - 3
   - 300

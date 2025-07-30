@@ -46,7 +46,7 @@ class VictorDataset(BaseImageDataset):
         #     store=self.store,)
         #     # compressors=compressor_map)
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=["robot_act_ea", "robot_obs_ea", 'image']
+            zarr_path, keys=["robot_act", "robot_obs", 'image']
         )
         print(self.replay_buffer.keys())
         print(f"Loaded replay buffer with {self.replay_buffer}")
@@ -58,6 +58,7 @@ class VictorDataset(BaseImageDataset):
             n_episodes=self.replay_buffer.n_episodes, 
             val_ratio=val_ratio,
             seed=seed)
+        print("VALIDATION MASK:", val_mask)
         train_mask = ~val_mask 
         # train_mask = downsample_mask(
         #     mask=train_mask, 
@@ -91,8 +92,8 @@ class VictorDataset(BaseImageDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         data = {
-            'action': self.replay_buffer['robot_act_ea'],
-            'robot_obs'   : self.replay_buffer['robot_obs_ea']
+            'action': self.replay_buffer['robot_act'],
+            'robot_obs'   : self.replay_buffer['robot_obs']
             # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
             # 'wrench': self.replay_buffer['wrench'],#[...,:2]
             # 'gripper_status': self.replay_buffer['gripper_status']
@@ -113,8 +114,8 @@ class VictorDataset(BaseImageDataset):
         # gripper_status = sample['gripper_status'].astype(np.float32)
         image = np.moveaxis(sample['image'],-1,1)/255   # unsure what this does, but everything breaks without it
         # image = sample['image'] / 255
-        robot_act = sample['robot_act_ea'].astype(np.float32)
-        robot_obs = sample['robot_obs_ea'].astype(np.float32)
+        robot_act = sample['robot_act'].astype(np.float32)
+        robot_obs = sample['robot_obs'].astype(np.float32)
     
         data = {
             'obs': {

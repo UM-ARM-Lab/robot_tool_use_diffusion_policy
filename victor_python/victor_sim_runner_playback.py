@@ -87,8 +87,14 @@ class VictorSimClient:
         # 2025 epochs with new ea config + epsilon
         # payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 3000 epochs + sample
-        payload = torch.load(open("data/outputs/2025.07.28/21.28.14_victor_diffusion_state_victor_diff/checkpoints/epoch=2900-train_action_mse_error=0.0000000.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.28/21.28.14_victor_diffusion_state_victor_diff/checkpoints/epoch=2900-train_action_mse_error=0.0000000.ckpt", "rb"), pickle_module=dill)
 
+        # OLD NEW OBS CONFIG (Joint angles)
+        # 250 epochs + image + sample
+        payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
+
+        # VALIDATION MASK: [False  True False False False False  True False False  True  True False False False False]
 
         self.cfg = payload['cfg']
         cfg = self.cfg
@@ -112,7 +118,8 @@ class VictorSimClient:
       
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
 
         print(self.zf["meta/episode_name"])
     
@@ -141,6 +148,11 @@ class VictorSimClient:
             self.get_logger().warn("No status received from server, but continuing anyway...")
             return True  # Continue even if no status - server might be in dry run mode
     
+    # assumes [7 dim joint angles, 4 dim gripper]
+    def send_action(self, action):
+        self.arm.send_joint_command(action[:7])
+        self.arm.send_gripper_command(action[7:])
+    
     def run_trajectory_inference_example(self):
         """Example of controlling arms individually with different controllers using new API."""
         self.get_logger().info("Starting individual arm contrvictor_policy_bridgeol example...")
@@ -156,9 +168,10 @@ class VictorSimClient:
                 return
         
         print(self.client.__getattribute__(self.side))
-        previous_act = self.zf["data/robot_act_ea"][0]
+        previous_act = self.zf["data/robot_act"][0]
         # Control loop
-        for i in range(0, 672):  #789 10535, 11193
+        self.cfg.n_action_steps = 1
+        for i in range(741, 1639, self.cfg.n_action_steps):  #789 10535, 11193
             print('iter:', i)
             # get observations
             right_pos = self.arm.get_joint_positions() # type: ignore
@@ -178,10 +191,10 @@ class VictorSimClient:
             if right_pos is not None:
                 self.accumulator.put({
                     "image" : np.moveaxis(np.array(self.zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
-                    "robot_obs" : np.array(self.zf["data/robot_obs_ea"][i])
+                    "robot_obs" : np.array(self.zf["data/robot_obs"][i])
                 })
 
-                print("OBS:\n", np.array(self.zf["data/robot_obs_ea"][i]))
+                print("OBS:\n", np.array(self.zf["data/robot_obs"][i]))
 
                 np_obs_dict = dict(self.accumulator.get())
 
@@ -202,22 +215,24 @@ class VictorSimClient:
                 np_action_dict = dict_apply(action_dict,
                     lambda x: x.detach().to('cpu').numpy())
                 
-                action = np_action_dict['action']
+                action = np_action_dict['action_pred']
                 print(action.shape)
                 
-                self.data_dict.add('robot_act_ea', action[0][0])  # store the action in the data_dict
-                previous_act = action[0][0] # save the previous action for the next iteration
-
+              
                 # print(np_action_dict)
                 # for i in range(len(action)):
-                # for j in range(self.cfg.n_action_steps):
-                #     print("executing", j)
-                #     self.arm.send_joint_command(action[0][j][:7])
-                #     self.arm.send_gripper_command(action[0][j][7:])
-                #     time.sleep(0.05)  # wait for the action to be executed
+                for j in range(self.cfg.n_action_steps):
+                    print("executing", j)
+                    self.send_action(action[0][j])
+                    self.data_dict.add('robot_act', action[0][j])  # store the action in the data_dict
+                    previous_act = action[0][j] # save the previous action for the next iteration
 
-                # self.arm.send_joint_command(action[0][0][:7])
-                # self.arm.send_gripper_command(action[0][0][7:])
+                    print("action:", action[0][j])
+                    # print("pred action:", np_action_dict['action_pred'][0][0])
+                    print("true action:", self.zf["data/robot_act"][i+j])
+                    time.sleep(0.1)  # wait for the action to be executed
+
+               
 
                 # action = np.array(self.zf["data/robot_act"][i])
                 # previous_act = action # save the previous action for the next iteration
@@ -226,12 +241,6 @@ class VictorSimClient:
                 # self.arm.send_gripper_command(action[7:])
                 # time.sleep(0.1)
 
-
-
-
-                print("action:", action[0][0])
-                # print("pred action:", np_action_dict['action_pred'][0][0])
-                print("true action:", self.zf["data/robot_act_ea"][i])
 
         self.get_logger().info("Individual arm control example completed")
         
