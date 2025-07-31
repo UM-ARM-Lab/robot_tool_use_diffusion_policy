@@ -53,22 +53,6 @@ class VictorSimClient:
         pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
          # load checkpoint
-
-        ### 15 EPISODES no wrench
-        # 30 epoch image + state
-        # payload = torch.load(open("data/outputs/2025.07.18/13.44.32_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-        # 250 epoch image + state OVERFIT
-        # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-        # 30 epoch image + state LOW VAL LOSS
-        # payload = torch.load(open("data/outputs/2025.07.20/12.01.12_victor_diffusion_image_victor_diff/checkpoints/epoch=0030-train_action_mse_error=0.000.ckpt", "rb"), pickle_module=dill)
-
-        
-        # 30 epoch state only
-        # payload = torch.load(open("data/outputs/2025.07.20/11.03.03_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-
-        # 60 epoch state only
-        # payload = torch.load(open("data/outputs/2025.07.21/09.57.34_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-
         # NEW OBS CONFIG TODO
         # 50 epoch state only
         # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
@@ -91,8 +75,9 @@ class VictorSimClient:
 
         # OLD NEW OBS CONFIG (Joint angles)
         # 250 epochs + image + sample
+        # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 500 epochs image + sample
         payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-
 
         # VALIDATION MASK: [False  True False False False False  True False False  True  True False False False False]
 

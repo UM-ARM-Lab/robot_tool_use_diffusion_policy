@@ -37,6 +37,7 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 import matplotlib.pyplot as plt
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
+from data_utils import SmartDict, store_h5_dict, store_zarr_dict
 
 
 if __name__ == "__main__":
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     # if os.path.exists(output_dir):
     #     click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
+    data_dict = SmartDict()
 
     ### 15 EPISODES no wrench
     # 30 epoch image + state
@@ -75,6 +76,7 @@ if __name__ == "__main__":
     # payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
     
     # OLD NEW OBS CONFIG (Joint angles)
+    # 500 epochs image + sample
     payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
@@ -93,19 +95,23 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
+    ### DATASET
     # zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
     # zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
     zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
 
     vic_acc = ObsAccumulator(cfg.policy.n_obs_steps)
 
-    for i in range(741, 1639):    #10535, 11193
+    for i in range(2225, 2830):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({
             "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
             "robot_obs" : np.array(zf["data/robot_obs"][i])
         })
+
+        data_dict["data/image"] = np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255
+        data_dict["data/robot_obs"] = np.array(zf["data/robot_obs"][i])
 
         # print(vic_acc.get())
         np_obs_dict = dict(vic_acc.get())
@@ -132,12 +138,16 @@ if __name__ == "__main__":
         np_action_dict = dict_apply(action_dict,
             lambda x: x.detach().to('cpu').numpy())
 
-        action = np_action_dict['action_pred']
+        action = np_action_dict['action_pred'][0][0]
+        # NOTE: in real life, the robot executes n_action_steps at a time instead of only 1. However, when
+        #       testing it without live feedback it doesn't make sense to do so since it can't get feedback on its actions
+        data_dict.add("data/robot_act_pred", action)
         # print(np_action_dict["action"], np_action_dict["action_pred"])
-        print(action.shape)
-        print(action[0][0][:7], "\t", action[0][0][7:])  # first 7 are joint positions, last 3 are gripper positions
-        print("pred action:", action[0][0])
+        # print(action[:7], "\t", action[7:])  # first 7 are joint positions, last 3 are gripper positions
+        print("pred action:", action)
         print("true action:", zf["data/robot_act"][i])
-        print("delta:", action[0][0] - zf["data/robot_act"][i])
-        print("percentage off:", np.abs((action[0][0] - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
-        print("absolute delta sum:", np.sum((action[0][0] - zf["data/robot_act"][i])**2))
+        print("delta:", action - zf["data/robot_act"][i])
+        print("percentage off:", np.abs((action - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
+        print("absolute delta sum:", np.sum((action - zf["data/robot_act"][i])**2))
+    
+    store_h5_dict("data/victor/victor_test.h5", data_dict)

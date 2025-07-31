@@ -72,6 +72,8 @@ class VictorSimClient:
 
         # OLD NEW OBS CONFIG (Joint angles)
         # 250 epochs + image + sample
+        # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 500 epochs image + sample
         payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         self.cfg = payload['cfg']
@@ -115,6 +117,18 @@ class VictorSimClient:
             self.image_callback,
             self.client.reliable_qos
         )
+        self.client.wrench_stop_sub = self.client.create_subscription(
+            WrenchStamped,
+            f'/victor/{self.side}_arm/wrench',
+            self.wrench_stop_callback,
+            self.client.high_freq_qos
+        )
+
+    def wrench_stop_callback(self, msg: WrenchStamped):
+        w = msg.wrench
+        wrench = [w.force.x, w.force.y, w.force.z, w.torque.x, w.torque.y, w.torque.z]
+        if np.abs(wrench[:3]) > 55:
+            exit(-777) # exit the execution 
     
     def image_callback(self, msg: Image):
         self.latest_img = rnp.numpify(msg)
@@ -155,7 +169,7 @@ class VictorSimClient:
 
         self.accumulator.put({
             # "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
-            # "image" : np.moveaxis(np.array(self.zf["data/image"][self.imi]),-1,0)/255,
+            "image" : np.moveaxis(np.array(self.zf["data/image"][self.imi]),-1,0)/255,
             "robot_obs" : sim_obs
         })
 
