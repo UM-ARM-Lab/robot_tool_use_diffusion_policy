@@ -98,20 +98,20 @@ policy:
   shape_meta:
     action:
       shape:
-      - 11
+      - 8
     obs: 
       robot_obs:
         shape:
-        - 22  # TODO was 21
+        - 19  # TODO was 21
         type: low_dim
 shape_meta:
   action:
     shape:
-    - 11
+    - 8
   obs:
     robot_obs:
       shape:
-      - 22  # TODO was 21
+      - 19  # TODO was 21
       type: low_dim
 task:
   dataset:
@@ -127,11 +127,11 @@ task:
   shape_meta:
     action:
       shape:
-      - 11
+      - 8
     obs:
       robot_obs:
         shape:
-        - 22  # TODO was 21
+        - 19  # TODO was 21
         type: low_dim
 task_name: victor_diff
 training:
