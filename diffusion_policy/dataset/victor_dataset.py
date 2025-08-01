@@ -138,7 +138,7 @@ class VictorDataset(BaseImageDataset):
 
 def test():
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr')
-    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data_07_24_single_trajectory.zarr')
+    zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data_07_31_no_plat.zarr')
     # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr/ds_processed.zarr.zip')
     dataset = VictorDataset(zarr_path, horizon=1)
     print(dataset.replay_buffer.data)

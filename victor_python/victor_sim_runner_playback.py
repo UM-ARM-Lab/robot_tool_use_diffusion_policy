@@ -74,10 +74,12 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.07.28/21.28.14_victor_diffusion_state_victor_diff/checkpoints/epoch=2900-train_action_mse_error=0.0000000.ckpt", "rb"), pickle_module=dill)
 
         # OLD NEW OBS CONFIG (Joint angles)
-        # 250 epochs + image + sample
+        # 250 epochs + image + sample 
         # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 500 epochs image + sample
-        payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 215 epochs image + sample + NO PLATEAUS
+        payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         # VALIDATION MASK: [False  True False False False False  True False False  True  True False False False False]
 
@@ -104,7 +106,9 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
+        self.zf = zarr.open("/home/KirillT/robot_tool_2025S/datasets/data_out/dspro_07_31_single_new.zarr.zip", mode='r') 
 
         print(self.zf["meta/episode_name"])
     
@@ -156,7 +160,7 @@ class VictorSimClient:
         previous_act = self.zf["data/robot_act"][0]
         # Control loop
         self.cfg.n_action_steps = 1
-        for i in range(741, 1639, self.cfg.n_action_steps):  #789 10535, 11193
+        for i in range(0, 711, self.cfg.n_action_steps):  #789 10535, 11193
             print('iter:', i)
             # get observations
             right_pos = self.arm.get_joint_positions() # type: ignore
@@ -201,6 +205,7 @@ class VictorSimClient:
                     lambda x: x.detach().to('cpu').numpy())
                 
                 action = np_action_dict['action_pred']
+                # action = np.zeros((1,1,11))
                 print(action.shape)
                 
               
@@ -215,7 +220,8 @@ class VictorSimClient:
                     print("action:", action[0][j])
                     # print("pred action:", np_action_dict['action_pred'][0][0])
                     print("true action:", self.zf["data/robot_act"][i+j])
-                    time.sleep(0.1)  # wait for the action to be executed
+                    # self.send_action(self.zf["data/robot_act"][i+j])
+                    # time.sleep(0.1)  # wait for the action to be executed
 
                
 
@@ -268,8 +274,8 @@ def main(args=None):
     except KeyboardInterrupt:
         if victor_sim:
             victor_sim.get_logger().info("Interrupted by user")
-            store_h5_dict("data/victor/victor_playback_data.h5", victor_sim.data_dict)
-            store_zarr_dict("data/victor/victor_playback_data.zarr.zip", victor_sim.data_dict)
+            store_h5_dict("data/victor/victor_playback_data_v2.h5", victor_sim.data_dict)
+            store_zarr_dict("data/victor/victor_playback_data_v2.zarr.zip", victor_sim.data_dict)
     except Exception as e:
         print(f"Client error: {e}")
         if victor_sim:

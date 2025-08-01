@@ -77,7 +77,9 @@ if __name__ == "__main__":
     
     # OLD NEW OBS CONFIG (Joint angles)
     # 500 epochs image + sample
-    payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # 215 epochs image + sample + NO PLATEAUS
+    payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
@@ -98,11 +100,12 @@ if __name__ == "__main__":
     ### DATASET
     # zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
     # zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
-    zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+    # zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
 
     vic_acc = ObsAccumulator(cfg.policy.n_obs_steps)
 
-    for i in range(2225, 2830):    #10535, 11193
+    for i in range(2225, 2235):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({
@@ -110,8 +113,8 @@ if __name__ == "__main__":
             "robot_obs" : np.array(zf["data/robot_obs"][i])
         })
 
-        data_dict["data/image"] = np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255
-        data_dict["data/robot_obs"] = np.array(zf["data/robot_obs"][i])
+        data_dict.add("data/image", np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255)
+        data_dict.add("data/robot_obs", np.array(zf["data/robot_obs"][i]))
 
         # print(vic_acc.get())
         np_obs_dict = dict(vic_acc.get())
@@ -130,7 +133,7 @@ if __name__ == "__main__":
         t1 = time.time()
         # run policy
         with torch.no_grad():
-            action_dict = policy.predict_action(obs_dict)
+            action_dict = policy.predict_action(obs_dict) 
         t2 = time.time()
         print("inference time:", t2 - t1, "seconds")
 

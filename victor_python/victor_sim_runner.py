@@ -74,7 +74,9 @@ class VictorSimClient:
         # 250 epochs + image + sample
         # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 500 epochs image + sample
-        payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 215 epochs image + sample + NO PLATEAUS
+        payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         self.cfg = payload['cfg']
         self.cfg.policy.num_inference_steps = 10
@@ -107,7 +109,9 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
+        self.pauseObs = False
 
     # sets up subscribers that are needed for the model specifically
     def _setup_subscribers(self):
@@ -121,13 +125,13 @@ class VictorSimClient:
             WrenchStamped,
             f'/victor/{self.side}_arm/wrench',
             self.wrench_stop_callback,
-            self.client.high_freq_qos
+            self.client.reliable_qos
         )
 
     def wrench_stop_callback(self, msg: WrenchStamped):
         w = msg.wrench
         wrench = [w.force.x, w.force.y, w.force.z, w.torque.x, w.torque.y, w.torque.z]
-        if np.abs(wrench[:3]) > 55:
+        if np.any(np.abs(wrench[:3]) > 55):
             exit(-777) # exit the execution 
     
     def image_callback(self, msg: Image):
@@ -136,7 +140,8 @@ class VictorSimClient:
 
     def update_accumulator_callback(self):
         assert self.client.__getattribute__(self.side) is not None, self.side + " arm client is not initialized"
-
+        if self.pauseObs == True: return
+        
         gripper = self.arm.get_gripper_status() # type: ignore
         gripper_obs = gripper_status_to_tensor(gripper, self.client.device) # type: ignore
       
@@ -147,7 +152,7 @@ class VictorSimClient:
             ms.joint_7
         ])
 
-        if self.previous_act is not None:
+        if np.all(self.previous_act != None):
             joint_cmd = self.arm.get_joint_commands()  # type: ignore
             gripper_cmd = self.arm.get_gripper_commands()
               # concat the joint commands and gripper pos requests
@@ -167,9 +172,11 @@ class VictorSimClient:
         # print(sim_obs.shape)
         print("SIM OBS:\n", sim_obs)
 
+        self.data_dict.add("image", self.latest_img)
+
         self.accumulator.put({
-            # "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
-            "image" : np.moveaxis(np.array(self.zf["data/image"][self.imi]),-1,0)/255,
+            "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
+            # "image" : np.moveaxis(np.array(self.zf["data/image"][self.imi]),-1,0)/255,
             "robot_obs" : sim_obs
         })
 
@@ -207,6 +214,8 @@ class VictorSimClient:
     def send_action(self, action):
         self.arm.send_joint_command(action[:7])
         self.arm.send_gripper_command(action[7:])
+
+
     def run_trajectory_inference_example(self):
         """Example of controlling arms individually with different controllers using new API."""
         self.get_logger().info("Starting individual arm control example...")
@@ -228,14 +237,13 @@ class VictorSimClient:
         
         # previous_act = np.array(self.zf["data/robot_act"][0])
         # print("OLD previous_act:", self.zf["data/robot_act"][0])
-        # action = self.zf["data/robot_act"][0]
+        # action = np.array(self.zf["data/robot_act"][0])
         # # previous_act = action
-        # self.arm.send_joint_command(action[:7])
-        # self.arm.send_gripper_command(action[7:])
-        # time.sleep(1)  # wait for the action to be sent
+        # self.send_action(action)
+        # time.sleep(3)  # wait for the action to be sent
         # previous_act = None
         # Control loop
-        # self.cfg.n_action_steps = 1
+        self.cfg.n_action_steps = 1
         for i in range(789000):  
             print('iter:', i)
 
@@ -249,12 +257,14 @@ class VictorSimClient:
                     device=self.device))
             
             # TODO pause the observation timer here? so that way the robot doesnt have huge gaps between but probably a bad idea
+            self.pauseObs = True
             t1 = time.time()
             # run policy
             with torch.no_grad():
                 action_dict = self.policy.predict_action(obs_dict)
             t2 = time.time()
             print("inference time:", t2 - t1, "seconds")
+            self.pauseObs = False
 
             # device_transfer
             np_action_dict = dict_apply(action_dict,
