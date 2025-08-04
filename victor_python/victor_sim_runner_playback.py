@@ -79,7 +79,11 @@ class VictorSimClient:
         # 500 epochs image + sample
         # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 215 epochs image + sample + NO PLATEAUS
-        payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 650 epochs no plateaus + no corrections + new finger act
+        payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
+
+
 
         # VALIDATION MASK: [False  True False False False False  True False False  True  True False False False False]
 
@@ -108,7 +112,8 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
-        self.zf = zarr.open("/home/KirillT/robot_tool_2025S/datasets/data_out/dspro_07_31_single_new.zarr.zip", mode='r') 
+        # self.zf = zarr.open("/home/KirillT/robot_tool_2025S/datasets/data_out/dspro_07_31_single_new.zarr.zip", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
 
         print(self.zf["meta/episode_name"])
     
@@ -140,7 +145,8 @@ class VictorSimClient:
     # assumes [7 dim joint angles, 4 dim gripper]
     def send_action(self, action):
         self.arm.send_joint_command(action[:7])
-        self.arm.send_gripper_command(action[7:])
+        # self.arm.send_gripper_command(action[7:])
+        self.arm.send_gripper_command([action[7], action[7], action[7], 1])
     
     def run_trajectory_inference_example(self):
         """Example of controlling arms individually with different controllers using new API."""
@@ -160,7 +166,7 @@ class VictorSimClient:
         previous_act = self.zf["data/robot_act"][0]
         # Control loop
         self.cfg.n_action_steps = 1
-        for i in range(0, 711, self.cfg.n_action_steps):  #789 10535, 11193
+        for i in range(0, 689, self.cfg.n_action_steps):  #789 10535, 11193
             print('iter:', i)
             # get observations
             right_pos = self.arm.get_joint_positions() # type: ignore

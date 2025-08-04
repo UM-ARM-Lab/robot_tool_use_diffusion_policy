@@ -76,7 +76,9 @@ class VictorSimClient:
         # 500 epochs image + sample
         # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 215 epochs image + sample + NO PLATEAUS
-        payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        # 650 epochs no plateaus + no corrections + new finger act
+        payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
 
         self.cfg = payload['cfg']
         self.cfg.policy.num_inference_steps = 10
@@ -110,7 +112,11 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
+
+        self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
+
+
         self.pauseObs = False
 
     # sets up subscribers that are needed for the model specifically
@@ -156,14 +162,14 @@ class VictorSimClient:
             joint_cmd = self.arm.get_joint_commands()  # type: ignore
             gripper_cmd = self.arm.get_gripper_commands()
               # concat the joint commands and gripper pos requests
-            curr_act = np.hstack([joint_cmd, gripper_cmd])
+            curr_act = np.hstack([joint_cmd, gripper_cmd[0]])
 
         else:
             joint_cmd = motion_status
             gripper_cmd = np.hstack([gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
             # concat the joint commands and gripper pos requests
             curr_act = np.hstack([joint_cmd, gripper_cmd])
-            self.previous_act = curr_act
+            self.previous_act = curr_act[:8]
 
         # print(wrench)
 
@@ -182,7 +188,7 @@ class VictorSimClient:
 
         self.data_dict.add('robot_obs', sim_obs)
 
-        self.previous_act = curr_act
+        self.previous_act = curr_act[:8]
         print("previous act", self.previous_act)
 
     def wait_for_server(self, timeout: float = 10.0) -> bool:
@@ -213,7 +219,8 @@ class VictorSimClient:
     # assumes [7 dim joint angles, 4 dim gripper]
     def send_action(self, action):
         self.arm.send_joint_command(action[:7])
-        self.arm.send_gripper_command(action[7:])
+        # self.arm.send_gripper_command(action[7:])
+        self.arm.send_gripper_command([action[7], action[7], action[7], 1])
 
 
     def run_trajectory_inference_example(self):

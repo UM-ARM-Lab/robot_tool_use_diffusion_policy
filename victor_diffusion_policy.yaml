@@ -137,7 +137,7 @@ task:
     pad_before: 0
     seed: 42
     val_ratio: 0.3
-    zarr_path: data/victor/victor_data_08_01_no_corr_single_finger_split.zarr # TODO not using the wrench data
+    zarr_path: data/victor/victor_data_08_01_no_corr_single_finger.zarr # TODO not using the wrench data
   image_shape:
   - 3
   - 300

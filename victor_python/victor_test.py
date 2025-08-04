@@ -79,7 +79,9 @@ if __name__ == "__main__":
     # 500 epochs image + sample
     # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
     # 215 epochs image + sample + NO PLATEAUS
-    payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+    # 650 epochs no plateaus + no corrections + new finger act
+    payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
@@ -101,11 +103,11 @@ if __name__ == "__main__":
     # zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
     # zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
     # zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
-    zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
 
     vic_acc = ObsAccumulator(cfg.policy.n_obs_steps)
 
-    for i in range(2225, 2235):    #10535, 11193
+    for i in range(689):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({
