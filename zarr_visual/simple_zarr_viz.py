@@ -42,7 +42,7 @@ def visualize_zarr_actions(zarr_file_path, visual_key='robot_act'):
     plt.show()
 
 if __name__ == "__main__":
-    zarr_file_path = "./data/victor/dspro_07_18.zarr.zip"
-    zarr_file_path = "./data/victor/dspro_07_21_no_wrench.zarr.zip"
+    # zarr_file_path = "./data/victor/dspro_07_18.zarr.zip"
+    zarr_file_path = "./data/victor/dspro_07_22_no_wrench.zarr.zip"
     # zarr_file_path = "./data/victor/dataset_2025-07-21_13-07-55.zarr.zip"
-    visualize_zarr_actions(zarr_file_path,visual_key='joint_angles_data')
+    visualize_zarr_actions(zarr_file_path,visual_key='gripper_status_position_request')

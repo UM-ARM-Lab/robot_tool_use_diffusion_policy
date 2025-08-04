@@ -1,4 +1,5 @@
 from typing import Dict
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,15 +10,20 @@ from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
-# from diffusion_policy.model.vision.multi_image_obs_encoder import MultiImageObsEncoder
-from diffusion_policy.model.vision.multi_model_obs_encoder import MultiModelObsEncoder
-from diffusion_policy.common.pytorch_util import dict_apply
+from diffusion_policy.common.robomimic_config_util import get_robomimic_config
+from robomimic.algo import algo_factory
+from robomimic.algo.algo import PolicyAlgo
+import robomimic.utils.obs_utils as ObsUtils
+import robomimic.models.base_nets as rmbn
+import diffusion_policy.model.vision.crop_randomizer as dmvc
+from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 
-class DiffusionUnetImagePolicy(BaseImagePolicy):
+
+class DiffusionUnetHybridModelPolicy(BaseImagePolicy):
     def __init__(self, 
             shape_meta: dict,
             noise_scheduler: DDPMScheduler,
-            obs_encoder: MultiModelObsEncoder,
+            obs_encoder: {},
             horizon, 
             n_action_steps, 
             n_obs_steps,
@@ -32,11 +38,11 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
             **kwargs):
         super().__init__()
 
-        # parse shapes
+        # parse shape_meta
         action_shape = shape_meta['action']['shape']
         assert len(action_shape) == 1
         action_dim = action_shape[0]
-        # get feature dim
+
         obs_feature_dim = obs_encoder.output_shape()[0]
 
         # create diffusion model
@@ -79,6 +85,9 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
+
+        print("Diffusion params: %e" % sum(p.numel() for p in self.model.parameters()))
+        print("Vision params: %e" % sum(p.numel() for p in self.obs_encoder.parameters()))
     
     # ========= inference  ============
     def conditional_sample(self, 
@@ -156,7 +165,7 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
             # condition through impainting
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, T, Do
+            # reshape back to B, To, Do
             nobs_features = nobs_features.reshape(B, To, -1)
             cond_data = torch.zeros(size=(B, T, Da+Do), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)

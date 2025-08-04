@@ -1,5 +1,5 @@
 _target_: diffusion_policy.workspace.train_diffusion_unet_hybrid_victor_workspace.TrainDiffusionUnetHybridWorkspace
-
+image_shape: &image_shape [3,300, 486]
 shape_meta:
     action:
       shape:
@@ -7,9 +7,19 @@ shape_meta:
     obs: 
       robot_obs:
         shape:
-        - 22
+        - 15
         type: low_dim
-        
+      image:
+        shape: *image_shape
+        type: rgb
+      wrench_data_window:
+        shape:
+        - 10
+        - 6
+        type: time_series
+      
+      
+      
 
 checkpoint:
   save_last_ckpt: true
@@ -66,8 +76,8 @@ optimizer:
   weight_decay: 1.0e-06
 past_action_visible: false
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
-  # _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
+  # _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
+  _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
   cond_predict_scale: true
   # crop_shape:
   # - 1
@@ -80,7 +90,7 @@ policy:
   # - 128
   # - 256
   # - 512
-  eval_fixed_crop: true
+  # eval_fixed_crop: true
   horizon: 8
   kernel_size: 5
   n_action_steps: 4
@@ -110,17 +120,40 @@ policy:
     steps_offset: 0
     prediction_type: sample # or sample # or epsilon
   
-  
+  obs_encoder:
+    _target_: diffusion_policy.model.vision.multi_model_obs_encoder.MultiModelObsEncoder
+    shape_meta: ${shape_meta}
+    rgb_model:
+      _target_: diffusion_policy.model.vision.model_getter.get_resnet
+      name: resnet18
+      weights: IMAGENET1K_V1 # or r3m
+    rgb_transform: 
+      _target_: diffusion_policy.model.vision.model_getter.get_rgb_transform
+      image_shape: *image_shape
+      resize_shape: [256, 256]
+      crop_shape: [224, 224]
+      random_crop: False
+      use_group_norm: False
+      share_rgb_model: True
+      imagenet_norm: True
+    
+    time_series_model:
+      _target_: diffusion_policy.model.wrench.model_getter.get_wrench_encoder
+      name: lstm
+      input_dim: 6
+      hidden_dim: 64
+     
+
 
   num_inference_steps: 100
   obs_as_global_cond: true
-  obs_encoder_group_norm: true
+  # obs_encoder_group_norm: true
   shape_meta: ${shape_meta}
   
 
 task:
   dataset:
-    _target_: diffusion_policy.dataset.victor_low_dim_dataset.VictorLowdimDataset
+    _target_: diffusion_policy.dataset.victor_low_dim_image_dataset.VictorLowdimImageDataset
     horizon: 8
     max_train_episodes: 1
     pad_after: 0
@@ -129,7 +162,8 @@ task:
     val_ratio: 0.05
     zarr_path: data/victor/output_data_1.zarr
     act_keys: ['robot_act']
-    obs_keys: ['robot_obs']
+    obs_keys: ['robot_obs','wrench_data_window']
+    image_keys: ['image']
 
 
   name: victor_diff

@@ -21,6 +21,7 @@ import numpy as np
 import shutil
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_unet_hybrid_image_policy import DiffusionUnetHybridImagePolicy
+from diffusion_policy.policy.diffusion_unet_force_image_policy import DiffusionUnetMultiModalPolicy
 # from diffusion_policy.dataset.victor_dataset import VictorDataset
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 # from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
@@ -45,9 +46,9 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
         random.seed(seed)
 
         # configure model
-        self.model: DiffusionUnetHybridImagePolicy = hydra.utils.instantiate(cfg.policy)
+        self.model: DiffusionUnetMultiModalPolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: DiffusionUnetHybridImagePolicy = None
+        self.ema_model: DiffusionUnetMultiModalPolicy = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 

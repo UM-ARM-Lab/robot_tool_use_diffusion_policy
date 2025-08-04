@@ -7,9 +7,8 @@ shape_meta:
     obs: 
       robot_obs:
         shape:
-        - 22
+        - 15
         type: low_dim
-        
 
 checkpoint:
   save_last_ckpt: true
@@ -67,7 +66,6 @@ optimizer:
 past_action_visible: false
 policy:
   _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
-  # _target_: diffusion_policy.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
   cond_predict_scale: true
   # crop_shape:
   # - 1
@@ -109,14 +107,30 @@ policy:
     set_alpha_to_one: True
     steps_offset: 0
     prediction_type: sample # or sample # or epsilon
-  
-  
 
   num_inference_steps: 100
   obs_as_global_cond: true
   obs_encoder_group_norm: true
   shape_meta: ${shape_meta}
   
+  obs_encoder:
+    _target_: diffusion_policy.model.vision.forceful_obs_encoder.MultiModalEncoder
+    shape_meta: ${shape_meta}
+
+
+    fusion_mode: 'modality-attention'
+    num_heads: 8
+    position_encoding: 'sinusoidal'
+    vision_encoder_cfg:
+      model_name: 'vit_base_patch16_clip_224.openai'
+     
+    audio_encoder_cfg:
+      model_name: 'ast'
+     
+      
+    wrench_encoder_cfg:
+      model_name: 'lstm'
+
 
 task:
   dataset:
@@ -129,7 +143,7 @@ task:
     val_ratio: 0.05
     zarr_path: data/victor/output_data_1.zarr
     act_keys: ['robot_act']
-    obs_keys: ['robot_obs']
+    obs_keys: ['robot_obs','wrench']
 
 
   name: victor_diff
