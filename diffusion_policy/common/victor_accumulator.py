@@ -17,6 +17,8 @@ class ObsAccumulator:
         while len(self.obs_dq) < self.To:   
             self.obs_dq.append(data)
 
+        # TODO add support for window types -> idea: if "window" in key then get latest obs[key] and append hte new obs to that
+
     # turns the deque into the dictionary format that the policy expects
     # "key0": Tensor of shape (B,To,*)
     # "key1": Tensor of shape e.g. (B,To,H,W,3)

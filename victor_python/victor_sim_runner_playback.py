@@ -81,8 +81,11 @@ class VictorSimClient:
         # 215 epochs image + sample + NO PLATEAUS
         # payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # 650 epochs no plateaus + no corrections + new finger act
-        payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
+        # payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
+        # 485 epochs SPLIT TRAJ
+        # payload = torch.load(open("data/outputs/split_trajectories_ckpts/latest.ckpt", "rb"), pickle_module=dill)
 
+        payload = torch.load(open("data/outputs/2025.08.04/15.29.42_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
 
         # VALIDATION MASK: [False  True False False False False  True False False  True  True False False False False]
@@ -114,6 +117,7 @@ class VictorSimClient:
         # self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
         # self.zf = zarr.open("/home/KirillT/robot_tool_2025S/datasets/data_out/dspro_07_31_single_new.zarr.zip", mode='r') 
         self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
+        # self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger_split.zarr", mode='r') 
 
         print(self.zf["meta/episode_name"])
     
@@ -166,7 +170,7 @@ class VictorSimClient:
         previous_act = self.zf["data/robot_act"][0]
         # Control loop
         self.cfg.n_action_steps = 1
-        for i in range(0, 689, self.cfg.n_action_steps):  #789 10535, 11193
+        for i in range(0, 689, self.cfg.n_action_steps):  #689 #383
             print('iter:', i)
             # get observations
             right_pos = self.arm.get_joint_positions() # type: ignore
