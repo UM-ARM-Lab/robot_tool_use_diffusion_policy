@@ -81,13 +81,8 @@ class VictorSimClient:
         # payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
         # 485 epochs SPLIT TRAJ
         # payload = torch.load(open("data/outputs/split_trajectories_ckpts/latest.ckpt", "rb"), pickle_module=dill)
-       
-        # progress prediction
-        # payload = torch.load(open("data/outputs/2025.08.04/15.29.42_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-        # NEW NEW NEW
-        payload = torch.load(open("data/outputs/2025.08.06/17.50.31_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-        
-        
+        payload = torch.load(open("data/outputs/2025.08.04/15.29.42_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+
         self.cfg = payload['cfg']
         self.cfg.policy.num_inference_steps = 10
         cls = hydra.utils.get_class(self.cfg._target_)
@@ -111,21 +106,25 @@ class VictorSimClient:
             0.1, # we trained our model on 10hz data
             self.update_accumulator_callback
         )
+        self.client.timer = self.client.create_timer(
+            0.01, # wrench windows are 10x faster polling than the rest of the data
+            self.update_wrench_window_callback
+        )
         # image index 
         self.imi = 0
 
         self.previous_act = None
-        self.last_img_t = time.perf_counter()
-    
+        self.latest_wrench = None 
+        self.wrench_window = None
+
         # self.zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_07_31_no_plat.zarr", mode='r') 
 
-        # self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger_split.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_08_06_new50_no_interp.zarr.zip", mode='r') 
 
 
         self.pauseObs = False
@@ -138,27 +137,22 @@ class VictorSimClient:
             self.image_callback,
             self.client.reliable_qos
         )
-        self.client.wrench_stop_sub = self.client.create_subscription(
+        self.client.wrench_sub = self.client.create_subscription(
             WrenchStamped,
             f'/victor/{self.side}_arm/wrench',
-            self.wrench_stop_callback,
+            self.wrench_callback,
             self.client.reliable_qos
         )
 
-    def wrench_stop_callback(self, msg: WrenchStamped):
+    def wrench_callback(self, msg: WrenchStamped):
         w = msg.wrench
         wrench = [w.force.x, w.force.y, w.force.z, w.torque.x, w.torque.y, w.torque.z]
+        self.latest_wrench = wrench
         if np.any(np.abs(wrench[:3]) > 55):
             exit(-777) # exit the execution 
     
     def image_callback(self, msg: Image):
-        received_t = time.perf_counter()
-        # print("time since last msg:", self.last_img_t - received_t)
         self.latest_img = rnp.numpify(msg)
-        # print("delay from receiving it:", msg.header.stamp.sec - received_t)
-        processing_t = time.perf_counter()
-        # print("it took", processing_t - received_t, "s to process")
-        self.last_img_t = received_t
         return 
 
     def update_accumulator_callback(self):
@@ -194,20 +188,23 @@ class VictorSimClient:
         sim_obs = np.hstack([self.previous_act, motion_status, gripper_obs[1], gripper_obs[3], gripper_obs[5], gripper_obs[7]])
         # print(sim_obs.shape)
         print("SIM OBS:\n", sim_obs)
+        
+        w = self.arm.get_wrench()
+        new_wrench_data = [w.force.x, w.force.y, w.force.z, w.torque.x, w.torque.y, w.torque.z]
 
         self.data_dict.add("image", self.latest_img)
 
         self.accumulator.put({
             "image" : np.moveaxis(self.latest_img,-1,0)/255,  # swap axis to make it fit the dataset shape
-            # "image" : np.moveaxis(self.latest_img,-1,0) * 0,  # swap axis to make it fit the dataset shape
             # "image" : np.moveaxis(np.array(self.zf["data/image"][self.imi]),-1,0)/255,
-            "robot_obs" : sim_obs
+            "robot_obs" : sim_obs,
+            "wrench_data_window" : new_wrench_data # NOTE: the obs accumulator is setup to just take the new TODO WRONG WRONG WRONG WRONG TODO ADD A NON INTERPOLATED VERSION!!
         })
 
         self.data_dict.add('robot_obs', sim_obs)
 
         self.previous_act = curr_act[:8]
-        # print("previous act", self.previous_act)
+        print("previous act", self.previous_act)
 
     def wait_for_server(self, timeout: float = 10.0) -> bool:
         """Wait for server to be available and sending status."""
@@ -314,7 +311,7 @@ class VictorSimClient:
                 time.sleep(0.1)  # wait for the action to be executed
 
             print("pred action:", action[0][0],"\n")
-            # print("true action:", self.zf["data/robot_act"][i])
+            print("true action:", self.zf["data/robot_act"][i])
 
         self.get_logger().info("Individual arm control example completed")
 

@@ -10,13 +10,6 @@ class ObsAccumulator:
         self.To = To
 
     def put(self, data: Dict[str, np.ndarray]):
-        # TODO add support for window types -> idea: if "window" in key then get latest obs[key] and append hte new obs to that
-        if "wrench_data_window" in data.keys():
-            if len(self.obs_dq) == 0:
-                data["wrench_data_window"] = np.repeat(data["wrench_data_window"][np.newaxis, ...], 10, axis=0)
-            else:
-                data["wrench_data_window"] = np.vstack([self.obs_dq[-1]["wrench_data_window"][1:], data["wrench_data_window"]])
-
         self.obs_dq.append(data)
         # fill the dq with the initial data point at the start
         while len(self.obs_dq) < self.To:   

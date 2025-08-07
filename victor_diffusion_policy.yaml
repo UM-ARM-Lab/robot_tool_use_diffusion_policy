@@ -132,12 +132,12 @@ task:
   dataset:
     _target_: diffusion_policy.dataset.victor_dataset.VictorDataset
     horizon: 16
-    max_train_episodes: 100
+    max_train_episodes: 1000
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.3
-    zarr_path: data/victor/victor_data_08_01_no_corr_single_finger.zarr # TODO not using the wrench data
+    val_ratio: 0.2
+    zarr_path: data/victor/victor_data_08_06_new50_no_interp.zarr.zip # TODO not using the wrench data
   image_shape:
   - 3
   - 300
