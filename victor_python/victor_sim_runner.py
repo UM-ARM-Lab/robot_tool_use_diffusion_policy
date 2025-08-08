@@ -107,10 +107,10 @@ class VictorSimClient:
         # setup accumulator
         self.accumulator = ObsAccumulator(self.cfg.policy.n_obs_steps)
         # setup accumulator update timer
-        self.client.timer = self.client.create_timer(
-            0.1, # we trained our model on 10hz data
-            self.update_accumulator_callback
-        )
+        # self.client.timer = self.client.create_timer(
+        #     0.1, # we trained our model on 10hz data
+        #     self.update_accumulator_callback
+        # )
         # image index 
         self.imi = 0
 
@@ -159,6 +159,11 @@ class VictorSimClient:
         processing_t = time.perf_counter()
         # print("it took", processing_t - received_t, "s to process")
         self.last_img_t = received_t
+
+        # TODO experimental
+        if not self.pauseObs:
+            self.update_accumulator_callback()
+
         return 
 
     def update_accumulator_callback(self):
@@ -295,7 +300,7 @@ class VictorSimClient:
             np_action_dict = dict_apply(action_dict,
                 lambda x: x.detach().to('cpu').numpy())
             
-            action = np_action_dict['action_pred']
+            action = np_action_dict['action']
             print(action.shape)
             
             

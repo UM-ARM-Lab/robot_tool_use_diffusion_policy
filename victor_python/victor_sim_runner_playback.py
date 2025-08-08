@@ -217,7 +217,7 @@ class VictorSimClient:
                 np_action_dict = dict_apply(action_dict,
                     lambda x: x.detach().to('cpu').numpy())
                 
-                action = np_action_dict['action_pred']
+                action = np_action_dict['action']
                 # action = np.zeros((1,1,11))
                 print(action.shape)
                 
