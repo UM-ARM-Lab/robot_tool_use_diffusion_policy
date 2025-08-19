@@ -272,7 +272,7 @@ class VictorSimClient:
         # previous_act = None
         # Control loop
         self.cfg.n_action_steps = 1
-        for i in range(789000):  
+        for i in range(789000): 
             print('iter:', i)
 
             # print("ROBOT_OBS:\n", np.array(self.zf["data/robot_obs"][i]))
@@ -300,7 +300,6 @@ class VictorSimClient:
             
             action = np_action_dict['action']
             print(action.shape)
-            
             
             # print(np_action_dict)
             # for i in range(len(action)):
@@ -345,9 +344,9 @@ def main(args=None):
         # Initialize example with specified configuration
         victor_sim = VictorSimClient()
         # victor_sim.client = VictorPolicyClient(
-        #     'policy_example', 
-        #     enable_left=enable_left, 
-        #     enable_right=enable_right, 
+        #     'policy_example',
+        #     enable_left=enable_left,
+        #     enable_right=enable_right,
         #     device=victor_sim.device
         # )
         victor_sim.get_logger = victor_sim.client.get_logger
