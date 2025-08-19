@@ -85,7 +85,7 @@ class VictorSimClient:
         # progress prediction
         # payload = torch.load(open("data/outputs/2025.08.04/15.29.42_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
         # NEW NEW NEW
-        payload = torch.load(open("data/outputs/2025.08.04/13.24.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
+        payload = torch.load(open("data/outputs/2025.08.06/17.50.31_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
 
         self.cfg = payload['cfg']
         self.cfg.policy.num_inference_steps = 10
@@ -124,7 +124,7 @@ class VictorSimClient:
 
         # self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger.zarr", mode='r') 
         # self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger_split.zarr", mode='r') 
-        self.zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger_split.zarr", mode='r') 
+        self.zf = zarr.open("data/victor/victor_data_08_06_new50_no_interp.zarr.zip", mode='r') 
 
         self.pauseObs = False
 
