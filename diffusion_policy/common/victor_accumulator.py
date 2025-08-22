@@ -15,6 +15,7 @@ class ObsAccumulator:
         while len(self.obs_dq) < self.To:   
             self.obs_dq.append(data)
 
+
     # turns the deque into the dictionary format that the policy expects
     # "key0": Tensor of shape (B,To,*)
     # "key1": Tensor of shape e.g. (B,To,H,W,3)
@@ -38,9 +39,11 @@ class ObsAccumulator:
 if __name__ == "__main__":
     print("deck")
     oa = ObsAccumulator(2)
-    oa.put({"a" : np.array([1,2,3]), "b" : np.array([[5,6,7,12], [1,1,1,1]])})
-    oa.put({"a" : np.array([1,5,1]), "b" : np.array([[5,6,7,13], [2,2,2,2]])})
-    oa.put({"a" : np.array([9,2,3]), "b" : np.array([[5,6,7,14], [3,3,3,3]])})
+    oa.put({"a" : np.array([1,2,3]), "b" : np.array([[5,6,7,12], [1,1,1,1]]), "wrench_data_window" : np.array([1,2,3,4,5,6])})
+    print(oa)
+    oa.put({"a" : np.array([1,5,1]), "b" : np.array([[5,6,7,13], [2,2,2,2]]), "wrench_data_window" : np.array([10,20,30,40,50,60])})
+    print(oa)
+    oa.put({"a" : np.array([9,2,3]), "b" : np.array([[5,6,7,14], [3,3,3,3]]), "wrench_data_window" : np.array([100,200,300,400,500,600])})
     print(oa)
     for k, v in oa.get().items():
         print("key", k, ":\n", v, "\tshape:", v.shape)

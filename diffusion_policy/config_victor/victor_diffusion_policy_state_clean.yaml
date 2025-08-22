@@ -122,12 +122,12 @@ task:
   dataset:
     _target_: diffusion_policy.dataset.victor_low_dim_dataset.VictorLowdimDataset
     horizon: 8
-    max_train_episodes: 1
+    max_train_episodes: 90
     pad_after: 0
     pad_before: 0
     seed: 42
-    val_ratio: 0.05
-    zarr_path: data/victor/output_data_1.zarr
+    val_ratio: 0.3
+    zarr_path: data/victor/victor_data_07_22_no_wrench.zarr
     act_keys: ['robot_act']
     obs_keys: ['robot_obs']
 

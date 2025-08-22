@@ -37,7 +37,6 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 import matplotlib.pyplot as plt
 
 from diffusion_policy.common.victor_accumulator import ObsAccumulator
-from data_utils import SmartDict, store_h5_dict, store_zarr_dict
 
 
 if __name__ == "__main__":
@@ -47,7 +46,7 @@ if __name__ == "__main__":
     # if os.path.exists(output_dir):
     #     click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
-    data_dict = SmartDict()
+    
 
     ### 15 EPISODES no wrench
     # 30 epoch image + state
@@ -67,26 +66,13 @@ if __name__ == "__main__":
     # NEW OBS CONFIG TODO
     # 50 epoch state only
     # payload = torch.load(open("data/outputs/2025.07.22/13.15.22_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    # 2620 epoch state only
-    # payload = torch.load(open("data/outputs/2025.07.24/16.59.38_victor_diffusion_state_victor_diff/checkpoints/epoch=2620-train_action_mse_error=0.0000040.ckpt", "rb"), pickle_module=dill)
-    # 555 epoch state only -> SINGLE OBS STEP
-    # payload = torch.load(open("data/outputs/2025.07.25/16.14.19_victor_diffusion_state_micro_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-        
-    # NEW NEW EA OBS CONFIG
-    # payload = torch.load(open("data/outputs/2025.07.28/16.39.25_victor_diffusion_state_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    
-    # OLD NEW OBS CONFIG (Joint angles)
-    # 500 epochs image + sample
-    # payload = torch.load(open("data/outputs/2025.07.29/16.18.40_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    # 215 epochs image + sample + NO PLATEAUS
-    # payload = torch.load(open("data/outputs/2025.07.31/19.19.04_victor_diffusion_image_victor_diff/checkpoints/latest.ckpt", "rb"), pickle_module=dill)
-    # 650 epochs no plateaus + no corrections + new finger act
-    # payload = torch.load(open("data/outputs/2025.08.01/17.45.59_victor_diffusion_image_victor_diff/checkpoints/epoch=0650-train_action_mse_error=0.0000003.ckpt", "rb"), pickle_module=dill)
-    # 485 epochs SPLIT TRAJ
-    payload = torch.load(open("data/outputs/split_trajectories_ckpts/latest.ckpt", "rb"), pickle_module=dill)
+    # 210 epoch image + state
+    payload = torch.load(open("data/outputs/2025.07.22/17.14.10_victor_diffusion_image_victor_diff/checkpoints/epoch=0210-train_action_mse_error=0.0000075.ckpt", "rb"), pickle_module=dill)
+
 
     cfg = payload['cfg']
     cfg.policy.num_inference_steps = 16
+    cfg.policy.n_latency_steps = 4
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
@@ -101,24 +87,17 @@ if __name__ == "__main__":
     device = torch.device(device)
     policy.to(device)
 
-    ### DATASET
-    # zf = zarr.open("data/victor/victor_data_07_24_single_trajectory.zarr", mode='r') 
-    # zf = zarr.open("data/victor/victor_data_07_28_end_affector.zarr", mode='r') 
-    # zf = zarr.open("data/victor/victor_data_07_29_all_ep_ea.zarr", mode='r') 
-    zf = zarr.open("data/victor/victor_data_08_01_no_corr_single_finger_split.zarr", mode='r') 
+    zf = zarr.open("data/victor/victor_data_07_22_no_wrench.zarr", mode='r') 
+    
+    vic_acc = ObsAccumulator(16)
 
-    vic_acc = ObsAccumulator(cfg.policy.n_obs_steps)
-
-    for i in range(689):    #10535, 11193
+    for i in range(10535, 11193):    #10535, 11193
         print('iter:', i)
 
         vic_acc.put({
-            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255,  # swap axis to make it fit the dataset shape
+            "image" : np.moveaxis(np.array(zf["data/image"][i]),-1,0),  # swap axis to make it fit the dataset shape
             "robot_obs" : np.array(zf["data/robot_obs"][i])
         })
-
-        data_dict.add("data/image", np.moveaxis(np.array(zf["data/image"][i]),-1,0)/255)
-        data_dict.add("data/robot_obs", np.array(zf["data/robot_obs"][i]))
 
         # print(vic_acc.get())
         np_obs_dict = dict(vic_acc.get())
@@ -137,7 +116,7 @@ if __name__ == "__main__":
         t1 = time.time()
         # run policy
         with torch.no_grad():
-            action_dict = policy.predict_action(obs_dict) 
+            action_dict = policy.predict_action(obs_dict)
         t2 = time.time()
         print("inference time:", t2 - t1, "seconds")
 
@@ -145,16 +124,10 @@ if __name__ == "__main__":
         np_action_dict = dict_apply(action_dict,
             lambda x: x.detach().to('cpu').numpy())
 
-        action = np_action_dict['action_pred'][0][0]
-        # NOTE: in real life, the robot executes n_action_steps at a time instead of only 1. However, when
-        #       testing it without live feedback it doesn't make sense to do so since it can't get feedback on its actions
-        data_dict.add("data/robot_act_pred", action)
-        # print(np_action_dict["action"], np_action_dict["action_pred"])
-        # print(action[:7], "\t", action[7:])  # first 7 are joint positions, last 3 are gripper positions
-        print("pred action:", action)
+        action = np_action_dict['action']
+        print(action.shape)
+        print("pred action:", action[0][0])
         print("true action:", zf["data/robot_act"][i])
-        print("delta:", action - zf["data/robot_act"][i])
-        print("percentage off:", np.abs((action - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
-        print("absolute delta sum:", np.sum((action - zf["data/robot_act"][i])**2))
-    
-    store_h5_dict("data/victor/victor_test.h5", data_dict)
+        print("delta:", action[0][0] - zf["data/robot_act"][i])
+        print("percentage off:", np.abs((action[0][0] - zf["data/robot_act"][i])) / zf["data/robot_act"][i])
+        print("absolute delta sum:", np.sum(np.abs((action[0][0] - zf["data/robot_act"][i]))))

@@ -16,15 +16,15 @@ register_codecs()
 
 class VictorDataset(BaseImageDataset):
     def __init__(self,
-            zarr_path, 
-            horizon=1,
-            pad_before=0,
-            pad_after=0,
-            seed=0,
-            val_ratio=0.0,
-            max_train_episodes=None
-            ):
-        
+        zarr_path, 
+        horizon=1,
+        pad_before=0,
+        pad_after=0,
+        seed=0,
+        val_ratio=0.0,
+        max_train_episodes=None
+    ):
+
         super().__init__()
         self.store = zarr.MemoryStore()
 
@@ -46,7 +46,7 @@ class VictorDataset(BaseImageDataset):
         #     store=self.store,)
         #     # compressors=compressor_map)
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=["robot_act", "robot_obs", 'image']
+            zarr_path, keys=["robot_act_aux", "robot_obs", 'image']
         )
         print(self.replay_buffer.keys())
         print(f"Loaded replay buffer with {self.replay_buffer}")
@@ -92,7 +92,7 @@ class VictorDataset(BaseImageDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         data = {
-            'action': self.replay_buffer['robot_act'],
+            'action': self.replay_buffer['robot_act_aux'],
             'robot_obs'   : self.replay_buffer['robot_obs']
             # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
             # 'wrench': self.replay_buffer['wrench'],#[...,:2]
@@ -114,7 +114,7 @@ class VictorDataset(BaseImageDataset):
         # gripper_status = sample['gripper_status'].astype(np.float32)
         image = np.moveaxis(sample['image'],-1,1)/255   # unsure what this does, but everything breaks without it
         # image = sample['image'] / 255
-        robot_act = sample['robot_act'].astype(np.float32)
+        robot_act = sample['robot_act_aux'].astype(np.float32)
         robot_obs = sample['robot_obs'].astype(np.float32)
     
         data = {
