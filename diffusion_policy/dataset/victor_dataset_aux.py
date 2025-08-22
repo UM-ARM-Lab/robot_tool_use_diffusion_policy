@@ -16,15 +16,15 @@ register_codecs()
 
 class VictorDataset(BaseImageDataset):
     def __init__(self,
-            zarr_path, 
-            horizon=1,
-            pad_before=0,
-            pad_after=0,
-            seed=0,
-            val_ratio=0.0,
-            max_train_episodes=None
-            ):
-        
+        zarr_path, 
+        horizon=1,
+        pad_before=0,
+        pad_after=0,
+        seed=0,
+        val_ratio=0.0,
+        max_train_episodes=None
+    ):
+
         super().__init__()
         self.store = zarr.MemoryStore()
 
