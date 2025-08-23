@@ -1,3 +1,62 @@
+ROS Bag Data Extraction for Victor Robot Diffusion Policy Training
+
+This script extracts and processes data from ROS2 bag files containing Victor dual-arm robot
+teleoperation recordings for training diffusion policy models. It converts raw ROS messages
+into structured datasets suitable for machine learning.
+
+Inputs:
+-------
+- ROS2 bag files (rosbag2 format) containing robot teleoperation data
+- Custom message definitions (.msg files) from victor_hardware_interfaces
+- Episode directories with the following structure:
+  - rosbag/: Contains the ROS2 bag files
+  - annotation.json: Contains keyframe timestamps (optional, for splitting)
+
+Outputs:
+--------
+- raw/: Directory containing processed datasets
+  - {episode_name}.h5: HDF5 format dataset
+  - {episode_name}.zarr.zip: Zarr format dataset (compressed)
+
+Tracked ROS Topics:
+------------------
+- /victor/{left,right}_arm/wrench: Force/torque sensor data
+- /{left,right}_arm_impedance_controller/commands: Joint angle commands
+- /victor/{left,right}_arm/motion_status: Joint positions, velocities, torques, poses
+- /victor/{left,right}_arm/gripper_status: 3-finger gripper status
+- /tf, /tf_static: Transform trees for robot kinematics
+- /zivid_node_local/frame_id: Camera frame information
+
+Dataset Structure:
+-----------------
+The output datasets contain time-aligned robot state information organized by:
+- {side}_arm/: Left/right arm data (joint_angles, motion_status, wrench, gripper_status, pose)
+- reference_pose/: Static reference frames
+- zivid/: Camera-related data
+- duration: Total recording duration
+
+Command Line Usage:
+------------------
+python extract_bag_data.py -d <data_directory> [-m <msg_path>] [-s <true|false>]
+
+Arguments:
+- -d, --data: Path to directory containing episode folders
+- -m, --msg: Path to victor_hardware_interfaces .msg files (optional)
+- -s, --split: Whether to split episodes at keyframe timestamps (default: true)
+
+Requirements:
+------------
+- ROS2 environment sourced (source ros/install/setup.bash)
+- victor_hardware_interfaces package built and available
+- rosbags, rclpy, numpy packages installed
+
+Note:
+-----
+Before running, ensure ROS2 workspace is properly sourced to access custom message definitions.
+
+
+## Example data structure
+```
 /
  ├── duration (1,) int64
  ├── left_arm
@@ -462,3 +521,4 @@
      ├── dataset_name (1,) <U72
      ├── frame_id (704,) int64
      └── timestamp (704,) int64
+```

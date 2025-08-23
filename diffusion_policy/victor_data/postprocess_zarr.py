@@ -1,3 +1,15 @@
+"""
+Post-processes .zarr datasets by removing plateau sequences where robot actions remain unchanged.
+
+Inputs:
+- Processed .zarr file from postprocess_bag_data.py containing robot trajectories
+- Auxiliary learning flag for progress tracking
+
+Outputs:  
+- Filtered .zarr file with plateaus removed
+- Temporary .h5 file at data/victor/tmp/ds_processed2.h5
+"""
+
 import argparse
 
 import numpy as np
@@ -7,8 +19,8 @@ import tqdm
 #            (after building victor_hardware_interfaces of course)
 # from victor_hardware_interfaces.msg import MotionStatus, Robotiq3FingerStatus
 
-from .ros_utils import *
-from .data_utils import SmartDict
+from diffusion_policy.victor_data.ros_utils import *
+from diffusion_policy.victor_data.data_utils import SmartDict
 
 import zarr
 import h5py
@@ -25,13 +37,10 @@ class ZarrPostProcessor():
 
         # stores all the topics that we want to copy over into the new dataset
         self.topics = ["data/" + k for k in list(self.zf_in["data"].keys())]
-        # self.topics.remove("data/image")
         self.topics.extend(["pose/" + k for k in list(self.zf_in["pose"].keys())])
-        print(self.topics)
         self.mask = np.ones(self.zf_in["meta/episode_ends"][-1], dtype=int)
 
     def copy_index(self, i):
-        # print(list(self.zf_in["data"].keys()))
         for t in self.topics:
             # print(t)
             self.data_dict.add(t, self.zf_in[t][i])
@@ -83,6 +92,7 @@ class ZarrPostProcessor():
             if self.mask[i] == 1:
                 self.ids.append(i)
         self.ids = np.array(self.ids)
+    
     # def get_plateau_mask(self):
     #     ep_starts_ends = [0]
     #     ep_starts_ends.extend(self.zf_in["meta/episode_ends"])
@@ -101,11 +111,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description = "A post-processor script to take the processed zarr file and augment it for training a Diffusion Policy model")
     parser.add_argument("-d", "--data", metavar="PATH_TO_PROCESSED_ZARR",help = "path to the processed zarr file",
-                        required = False, default = "datasets/data_out/ds_pro_08_04_aux_learn.zarr.zip")
+                        required=True)
     parser.add_argument("-p", "--processed", metavar="PATH_TO_PROCESSED_FILE", help = "path to save the post processed zarr file at",
-                         required = False, default = "datasets/data_out/victor_data_08_04_aux_learn.zarr.zip")
+                         required=True)
     parser.add_argument("-a", "--aux", help = "should the model learn auxilary tasks", choices=["true", "false"],
-                         required = False, default = "true")
+                         required=False, default = "true")
     argument = parser.parse_args()
 
     zarr_in_path = argument.data
@@ -126,7 +136,7 @@ if __name__ == "__main__":
     # zarr_proc.zf_in = None
 
     zf_out = zarr.ZipStore(processed_path, mode="w")
-    h5_out = h5py.File("datasets/data_out/ds_processed^2.h5", mode="w")
+    h5_out = h5py.File("data/victor/tmp//ds_processed2.h5", mode="w")
     ep_ends = [0]
     ep_ends.extend(zarr_proc.data_dict["meta/episode_ends"])
     old_ep_ends = [0]
@@ -134,18 +144,9 @@ if __name__ == "__main__":
     for ep_i in range(1, len(ep_ends)):
         print(f"SAVING EP{ep_i}")
         for t in zarr_proc.topics:
-            # print(dir(zarr_proc.zf_in[t]))
-            print("SAVING:", t)
             ep_ids = zarr_proc.ids[np.where((zarr_proc.ids >= old_ep_ends[ep_i-1]) & (zarr_proc.ids < old_ep_ends[ep_i]))] - old_ep_ends[ep_i-1]
-            # print(ep_ends[ep_i], old_ep_ends[ep_i], len(ep_ids))
-            # np.ma.array(np.array(zarr_proc.zf_in[t]), mask = zarr_proc.mask)
-            # print(zarr_proc.zf_in[t].shape)
-            # print("SUM", np.sum(zarr_proc.mask))
-            # print(zarr_proc.ids)
-            # print(np.array(zarr_proc.zf_in[t])[zarr_proc.ids].shape)
             v = np.array(zarr_proc.zf_in[t][old_ep_ends[ep_i-1]:old_ep_ends[ep_i]])[ep_ids]
             if ep_i == 1:
-                # print(v.shape)
                 zarr.array(data=v, path=t, store=zf_out, chunks=zarr_proc.zf_in[t].chunks)
 
                 # save h5

@@ -1,3 +1,10 @@
+"""
+Convert raw rosbag into zarr/h5 file for processing
+
+The output is NOT timestamp aligned. Rather, it just stores everything into zarr, with timestamps.
+See the .md file for details
+"""
+
 import argparse
 from pathlib import Path
 import os
@@ -16,8 +23,8 @@ from geometry_msgs.msg import WrenchStamped
 #            (after building victor_hardware_interfaces of course)
 # from victor_hardware_interfaces.msg import MotionStatus, Robotiq3FingerStatus
 
-from .ros_utils import *
-from .data_utils import store_h5_dict, SmartDict, store_zarr_dict
+from diffusion_policy.victor_data.ros_utils import *
+from diffusion_policy.victor_data.data_utils import store_h5_dict, SmartDict, store_zarr_dict
 
 
 def guess_msgtype(path: Path) -> str:
@@ -31,7 +38,6 @@ class BagProcessor():
     def __init__(self, m_d, s):
         self.split = s == "true"
         self.msg_dir = Path(m_d)
-        # print(self.msg_dir)
         self.msg_file_names = os.listdir(self.msg_dir)    # assumes only .msg files in dir
         
         # load the default typestore + add custom victor_hardware_interfaces msgs
@@ -39,7 +45,8 @@ class BagProcessor():
         add_types = {}
 
         for msg_name in self.msg_file_names:
-            if ".msg" not in msg_name:  continue
+            if ".msg" not in msg_name: 
+                continue
             msgpath = Path.joinpath(self.msg_dir, msg_name)
             msgdef = msgpath.read_text(encoding='utf-8')
             add_types.update(get_types_from_msg(msgdef, guess_msgtype(msgpath)))
@@ -76,9 +83,6 @@ class BagProcessor():
             "vr"
         }
 
-        # init a new SmartDict 
-        self.reset()
-
     def reset(self):
         self.dataset = SmartDict(backend="numpy")
 
@@ -86,6 +90,7 @@ class BagProcessor():
         return ros_duration_to_ns(ros_abs_time_to_elapsed_duration(t, self.init_time))
 
     def process(self, ep_dir, name):
+        self.reset()    # prepare for the new bag
         bag_dir = os.path.join(ep_dir, "rosbag")
         save_dir = os.path.join(ep_dir, "raw")
         annotation_path = os.path.join(ep_dir, "annotation.json")
@@ -93,8 +98,6 @@ class BagProcessor():
         # split
         if self.split:
             split_second = json.load(open(annotation_path, "r"))["keyframes"]['align_cap']
-
-        print("beginning processing", bag_dir, "...")
 
         with Reader(bag_dir) as reader:
             #initial time is the time the first mesage was received
@@ -106,13 +109,8 @@ class BagProcessor():
                 if split_second is not None and self.elapsed_ns(Time(nanoseconds=timestamp)) > split_second * 1e9: 
                     print("splitting at:", split_second, self.elapsed_ns(Time(nanoseconds=timestamp))) 
                     break # 71385413766
-
-                # print('timestamp:', timestamp)
-
                 msg = self.typestore.deserialize_cdr(rawdata, connection.msgtype)
 
-                # print()
-                # print(connection.topic)
                 if "tf" in connection.topic:
                     self.tracked_topics[connection.topic](msg, Time(nanoseconds=timestamp), "static" in connection.topic)
                 elif "zivid" in connection.topic:
@@ -121,25 +119,16 @@ class BagProcessor():
                     self.tracked_topics[connection.topic](msg, Time(nanoseconds=timestamp), "right")
                 else:
                     self.tracked_topics[connection.topic](msg, Time(nanoseconds=timestamp), "left")
-
                 final_second = timestamp
-
             self.dataset.add("duration", final_second - reader.start_time)
-
-        # print(topics)
-        print("finished processing", bag_dir, "bag...")
 
         # save the dict
         self.save_raw_dict(save_dir, name)
-    
-        self.reset()    # prepare for the next bag
-        print()
+        return self.dataset.copy()
 
     def save_raw_dict(self, save_dir, name):
         ds_dir = Path(save_dir)
         ds_dir.mkdir(parents=True, exist_ok=True)
-
-        print("saving dataset dict to", save_dir)
         store_h5_dict(os.path.join(save_dir, name + ".h5"), self.dataset)
         store_zarr_dict(os.path.join(save_dir, name + ".zarr.zip"), self.dataset)
 
@@ -220,7 +209,6 @@ class BagProcessor():
 
         self.dataset.add(side + "_arm/gripper_status/timestamp", self.elapsed_ns(t))
 
-
     def __process_tf(self, msg, r_time, is_static: bool):
         assert msg.__msgtype__ == "tf2_msgs/msg/TFMessage"
         ti = r_time 
@@ -253,7 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--data", metavar="PATH_TO_DATA_IN_DIR" ,help = "path to the data in directory",
                         required = False, default = "data_in")   #rosbag/rosbag2_2025_06_05-12_29_01
     parser.add_argument("-m", "--msg", metavar="PATH_TO_MSG", help = "path to the victor_hardware_interfaces .msg files",
-                         required = False, default = "ros/victor_hardware_interfaces/msg/")
+                         required = False, default=f"{os.path.dirname(__file__)}/victor_hardware_interfaces/msg/")
     parser.add_argument('-s', '--split', help = "should the dataset be split before a keyframe", choices=["true", "false"],
                          required = False, default = "true")
     argument = parser.parse_args()
@@ -265,17 +253,9 @@ if __name__ == "__main__":
     
     # optional args
     msg_path = argument.msg    # defaults to ros/victor_hardware_i1terfaces/msg/
-
-
     bag_proc = BagProcessor(msg_path, to_split)
 
     for ep_name in os.listdir(data_dir):
-        print(ep_name)
-        # bag_proc.process(os.path.join(data_dir, ep_dir, "rosbag"),
-        #                  os.path.join(data_dir, ep_dir, "raw"), ep_dir)
+        print("Beginning", ep_name)
         bag_proc.process(os.path.join(data_dir, ep_name), ep_name)
-
-    
-    print()
-    # move into the process func
 

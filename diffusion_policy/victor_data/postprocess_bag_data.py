@@ -1,3 +1,24 @@
+"""
+Post-processes raw ROS bag data for Victor robot into a structured dataset for Diffusion Policy training.
+
+This script converts raw ROS bag data (stored as .zarr files) into a processed dataset by:
+1. Synchronizing sensor topics at a fixed frequency, OR aligned to vision if vision is enabled
+2. (Optional) Interpolating missing values to exact timestamps
+3. Extracting robot poses, joint states, gripper status, and wrench data from MotionStatus
+4. (Optional) Including vision data from Zivid cameras
+
+Inputs:
+- Raw dataset directory containing episode folders with .zarr files and optional image data
+- Configuration parameters (robot side, vision enabled, interpolation settings)
+
+Outputs:
+- Processed dataset saved as .zarr and .h5 files containing:
+  - Synchronized robot observations (joint positions, gripper states, poses)
+  - Robot actions (joint commands, gripper commands)
+  - Optional image data and wrench force windows
+  - Episode metadata and timestamps
+"""
+
 import argparse
 import os
 
@@ -6,15 +27,15 @@ from tf2_ros.buffer import Buffer
 import tf2_py as tf2
 
 import numpy as np
+import tqdm
 
-from std_msgs.msg import String
 # TODO NOTE: every time you want to run this script, make sure to 
 #               source ros/install/setup.bash
 #            (after building victor_hardware_interfaces of course)
 # from victor_hardware_interfaces.msg import MotionStatus, Robotiq3FingerStatus
 
-from .ros_utils import *
-from .data_utils import (
+from diffusion_policy.victor_data.ros_utils import *
+from diffusion_policy.victor_data.data_utils import (
     read_h5_dict_recursive,
     read_zarr_dict_recursive,
     store_h5_dict,
@@ -31,8 +52,14 @@ import zarr
 import h5py
 
 class BagPostProcessor():
-    def __init__(self, side, vis, aux, inter, hz = 10, wrench_ratio = 10):
-        self.hz = hz
+    def __init__(self,
+        side,
+        vis,
+        aux,
+        inter,
+        hz = 10,
+        wrench_ratio = 30
+    ):
         self.wrench_ratio = wrench_ratio    # number of wrench messages per window
         self.freq = 1/hz # NOTE: timestamps are in ns   # TODO no longer needed due to the zivid times
 
@@ -40,26 +67,44 @@ class BagPostProcessor():
         self.use_aux_learn = aux
         self.use_interpolation = inter
         self.tracked_sides = [side]
+
         # persistent processed dataset
-        self.pro_dataset = SmartDict(backend="numpy")  # processed dataset 
+        self.proc_dataset = SmartDict(backend="numpy")  # processed dataset 
         self.last_ep_end = 0
 
-    # sets everything up to process a new raw file
-    def __setup(self, zarr_dir, image_dir):
-        self.zarr_dir = zarr_dir
-        self.img_dir = image_dir
+    def post_process(self, data_dir, ep):
+        # Setup
+        self.zarr_dir = os.path.join(data_dir, ep, "raw", ep + ".zarr.zip")
+        self.img_dir = os.path.join(data_dir, ep, "zivid")
 
         # forcing the buffer to keep all the updates (up to an hr)
         self.buffer = Buffer(cache_time=Duration(seconds=3600))
 
+        # Read data
         zf = zarr.open(self.zarr_dir, mode='r')
-        # print(zf.tree())
         self.raw_dataset = SmartDict(backend="numpy")
         read_zarr_dict_recursive(zf, self.raw_dataset)
-        # print(self.raw_dataset)
 
+        # Prepare for prcessing
+        self._setup_topics(zf)
+        self._setup_timestamps()
 
-        ### SETUP TRACKED TOPICS
+        # Actual processing
+        self._register_transform_buffer()
+        self._interpolate_tf()
+        self._add_other_values()
+        self._add_vision()
+        self._add_finger_specifics()
+        self._add_wrench()
+        self._add_progress()
+        self._add_extra_fields()
+        self._add_episode_ends(ep)
+        # self.__second_pass(ep)
+
+    def _setup_topics(self, zf):
+        """
+        Setup which topics to track
+        """
         # self.tracked_sides = ["left", "right"]
         self.parent_topics = [  # mostly used for finding the corresponding timestamp for these topics
             "gripper_status",
@@ -76,12 +121,13 @@ class BagPostProcessor():
         for side in self.tracked_sides:
             # automatically process parent topics's subtopics
             for pt in self.parent_topics:
-                # a = get_h5_leaf_topics(hf, "/left_arm/motion_status", 0, 1)
-                # a.remove("timestamp")
-                if pt in manual_parent_topics:  continue
+                if pt in manual_parent_topics:
+                    continue
 
                 key = "/" + side + "_arm/" + pt
-                if key + "/timestamp" not in self.raw_dataset.keys():   continue    # no data was recorded for this topic
+                if key + "/timestamp" not in self.raw_dataset.keys():
+                    continue    # no data was recorded for this topic
+
                 self.tracked_topics[key] = [t for t in zf[key].keys() if "timestamp" not in t]
                 # TODO removed the per arm tracking
                 # self.tracked_topics[pt] = [t for t in get_h5_leaf_topics(hf, key, 0, 1) if "timestamp" not in t]
@@ -91,22 +137,39 @@ class BagPostProcessor():
             # measured joint position is used for the obs, while joint_angles are the commands
             self.tracked_topics["/" + side + "_arm/motion_status"] = ["measured_joint_position"] #, "commanded_joint_position"]
 
-        # manually adding topics that do not have a left and a right side
-        # print(self.tracked_topics)
+            # manually adding topics that do not have a left and a right side
+            # print("Tracking", self.tracked_topics)
 
-        # contains all the wrench topics that should be tracked at a higher frequency
-        self.wrench_topics = ["/" + side + "_arm/wrench"]   # NOTE ASSUMES THAT THIS TOPIC HAS /data
+            # contains all the wrench topics that should be tracked at a higher frequency
+            self.wrench_topics = ["/" + side + "_arm/wrench"]   # NOTE ASSUMES THAT THIS TOPIC HAS /data
 
-        # contains all the transform frames in the dataset,
-        #  not necessarily all that will be included in the final dataset
-        self.tf_buffer_topics = []
-        for side in self.tracked_sides:
-            self.tf_buffer_topics.extend([f"/{side}_arm/pose/" + k for k in zf[f"/{side}_arm/pose"].keys()])
-            self.tf_buffer_topics.extend([f"/{side}_arm/pose_static/" + k for k in zf[f"/{side}_arm/pose_static"].keys()])
-        # print("tf_buffer:", self.tf_buffer_topics)
-        self.tf_buffer_reference_topics = ["/reference_pose/" + k for k in zf["/reference_pose"].keys()]
-        # print(self.tf_buffer_reference_topics)
+            # contains all the transform frames in the dataset,
+            #  not necessarily all that will be included in the final dataset
+            self.tf_buffer_topics = []
+            for side in self.tracked_sides:
+                self.tf_buffer_topics.extend([f"/{side}_arm/pose/" + k for k in zf[f"/{side}_arm/pose"].keys()])
+                self.tf_buffer_topics.extend([f"/{side}_arm/pose_static/" + k for k in zf[f"/{side}_arm/pose_static"].keys()])
+            self.tf_buffer_reference_topics = ["/reference_pose/" + k for k in zf["/reference_pose"].keys()]
 
+    # finds the earliest time when at all tracked topics have published at least 1 msg
+    def __find_earliest_valid_time(self):
+        """
+        Find the earliest time at which all relevant topics have published at least one message.
+        """
+        # Generate all possible keys for parent topics across all tracked sides
+        ks = []
+        ks.extend(["/" + side + "_arm/" + t + "/timestamp" for side in self.tracked_sides \
+                   for t in self.parent_topics])
+        ks.extend(["/" + side + "_arm/pose/" + t + "/timestamp" for side in self.tracked_sides \
+                   for t in self.__get_tf_topics(side)])
+        ks.extend(["/" + side + "_arm/pose_static/" + t + "/timestamp" for side in self.tracked_sides \
+                   for t in self.__get_tf_topics(side)])
+        ks = [k for k in ks if k in self.raw_dataset.keys()]
+        earliest_ts_each = [self.raw_dataset[k][0] for k in ks]
+        earliest_ts = max(earliest_ts_each) if earliest_ts_each else 0.0
+        return earliest_ts
+    
+    def _setup_timestamps(self):
         ### SETUP timestamps
         evt = self.__find_earliest_valid_time()
         # self.timestamps = list(range(evt, int(self.raw_dataset["/duration"][0]), int(self.freq * 1e9)))
@@ -116,12 +179,90 @@ class BagPostProcessor():
             self.timestamps = self.raw_dataset["/zivid/timestamp"][evt_zivid:]
             # TODO WRONG
             # self.wrench_timestamps = self.raw_dataset["/wrench/timestamp"][evt_zivid:]
-            self.img_h5 = None
         else:
             self.timestamps = list(range(evt, int(self.raw_dataset["/duration"][0]), int(self.freq * 1e9)))
 
+        self._filter_timestamps_for_plateau()
+        # Add filtered timestamp to dataset
+        for ts in self.timestamps:
+            self.proc_dataset.add("data/timestamp", ts)
+
+    def _filter_timestamps_for_plateau(self):
+        """
+        Detect plateaus in the robot's action commands over the recorded timestamps.
+        A plateau is defined as a sequence of consecutive timestamps where the robot's
+        actions remain unchanged. This method updates the internal timestamp list to
+        exclude these plateau regions, which are not informative for training.
+        """
+        if len(self.timestamps) <= 1:
+            return
+        
+        # Get joint angles data using _interpolate_other_values
+        joint_angles = None
+        gripper_requests = None
+        
+        ts_all = np.asarray(self.timestamps)
+        do_linear = bool(self.use_interpolation)
+        
+        # Get joint angles data
+        for t, v in self.tracked_topics.items():
+            if "joint_angles" in t:
+                topic, value_topics = t, v
+                break
+        ts_arr = np.asarray(self.raw_dataset[topic + "/timestamp"])
+        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics)
+        if "data/joint_angles_data" in rtn_dict:
+            joint_angles = np.array(rtn_dict["data/joint_angles_data"])
+
+        # Create a temporary processed dataset to get gripper data
+        temp_proc_dataset = {}
+        
+        # Get gripper status data
+        for t, v in self.tracked_topics.items():
+            if "gripper_status" in t:
+                topic, value_topics = t, v
+                break
+        ts_arr = np.asarray(self.raw_dataset[topic + "/timestamp"])
+        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics)
+        temp_proc_dataset = rtn_dict
+        
+        # Extract gripper request data from the temporary dataset
+        if temp_proc_dataset:
+            diffs = ["finger_a", "finger_b", "finger_c", "scissor"]
+            finger_topics = [f"data/gripper_status_{d}_status" for d in diffs]
+            
+            # Check if all finger topics are present
+            if all(topic in temp_proc_dataset for topic in finger_topics):
+                series = [np.asarray(temp_proc_dataset[topic]) for topic in finger_topics]
+                req_arrays = [s[:, 0] for s in series]  # Extract request values (column 0)
+                gripper_requests = np.column_stack(req_arrays)  # (T, 4)
+        
+        if joint_angles is None or gripper_requests is None:
+            print("Warning: Could not compute joint angles or gripper data for plateau filtering")
+            return
+        
+        # Create timestamp mask array (1 = keep, 0 = remove)
+        mask = np.ones(len(self.timestamps), dtype=bool)
+        tolerance = 1e-5
+        
+        # Compare each timestamp with the previous one
+        for i in range(1, len(self.timestamps)):
+            # Check if joint angles haven't changed
+            joint_unchanged = np.allclose(joint_angles[i], joint_angles[i-1], atol=tolerance)
+            gripper_unchanged = np.allclose(gripper_requests[i], gripper_requests[i-1], atol=tolerance)
+            
+            # If both haven't changed, mark for removal
+            if joint_unchanged and gripper_unchanged:
+                mask[i] = False
+        
+        # Update timestamps to keep only non-plateau points
+        original_count = len(self.timestamps)
+        self.timestamps = [self.timestamps[i] for i in range(len(self.timestamps)) if mask[i]]
+        filtered_count = len(self.timestamps)
+        # print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
+
     # returns the topics we want to track in the final dataset
-    def __get_tf_topics(self, side: String):
+    def __get_tf_topics(self, side: str):
         return [
             "target_victor_" + side + "_tool0",
             "victor_" + side + "_tool0",
@@ -135,15 +276,22 @@ class BagPostProcessor():
             # "victor_" + side + "_arm_link_6",
             # "victor_" + side + "_arm_link_7",
         ]
-    
-    def post_process(self, data_dir, ep):
-        self.__setup(os.path.join(data_dir, ep, "raw", ep + ".zarr.zip"), os.path.join(data_dir, ep, "zivid"))
-        print("processing", self.zarr_dir,"...")
-        self.__first_pass()
-        self.__second_pass(ep)
 
     # add a tf topic to the tf buffer
     def __process_tf_topic(self, key):
+        """
+        Processes a specific TF (transform) topic from the raw dataset and updates the transform buffer.
+        This method iterates through the timestamps of a given TF topic, retrieves the associated
+        frame IDs, translation, and rotation data, and constructs a transform object. The transform
+        is then added to the buffer as either a static or dynamic transform based on the topic name.
+        
+        Args:
+            key (str): The key representing the TF topic in the raw dataset.
+        Notes:
+            - If the topic contains "static" or "reference" in its name, the transform is treated as static.
+            - Assumes that the raw dataset contains the necessary keys for timestamps, frame IDs, 
+              translation, and rotation.
+        """
         # in case some data was not recorded (like one of the arms hadnt been used)
         # if (key + "/timestamp") not in self.raw_dataset.keys(): return
         
@@ -168,292 +316,341 @@ class BagPostProcessor():
                 self.buffer.set_transform_static(tr, "default_authority")
             else:
                 self.buffer.set_transform(tr, "default_authority")
-            
 
     # fill the buffer with the available transforms (to use for interpolation)
-    def __first_pass(self):
-        print("\n--------------------------------------------------------------\nperforming the first pass...")
-        # print(self.raw_dataset)
-        for k in self.tf_buffer_topics:
-            print(f"tf topic: {k}")
+    def _register_transform_buffer(self):
+        """
+        Registers all truly recorded TF transforms into the transform buffer.
+        This includes both dynamic and static transforms from the raw dataset.
+        """
+        # Combine tf buffer topics and reference topics into a temporary set
+        all_tf_topics = set(self.tf_buffer_topics + self.tf_buffer_reference_topics)
+        for k in all_tf_topics:
             self.__process_tf_topic(k)
 
-        for k in self.tf_buffer_reference_topics:
-            print("reference topic:", k)
-            self.__process_tf_topic(k)
-            # print("here")
-        print("first pass COMPLETE! \n--------------------------------------------------------------\n")
-
-
-    # finds the earliest time when at all tracked topics have published at least 1 msg
-    def __find_earliest_valid_time(self):
-        earliest_ts = 0   
-
-        for side in self.tracked_sides:
-            tf_topics = self.__get_tf_topics(side)
-            # TODO: ugly way of doing this
-            for t in self.parent_topics: 
-                k = "/" + side + "_arm/" + t + "/timestamp"
-                if k not in self.raw_dataset.keys():    continue
-                if self.raw_dataset[k][0] > earliest_ts:
-                    earliest_ts = self.raw_dataset[k][0]
-                    # print(earliest_ts)
-            for t in tf_topics:
-                k = "/" + side + "_arm/pose/" + t + "/timestamp"
-                if k not in self.raw_dataset.keys():    continue
-                if self.raw_dataset[k][0] > earliest_ts:
-                    earliest_ts = self.raw_dataset[k][0]
-                    # print(earliest_ts)
-            for t in tf_topics:
-                k = "/" + side + "_arm/pose_static/" + t + "/timestamp"
-                if k not in self.raw_dataset.keys():    continue
-                if self.raw_dataset[k][0] > earliest_ts:
-                    earliest_ts = self.raw_dataset[k][0]
-                    # print(earliest_ts)
-        return earliest_ts
-    
-    # finds the eqn of a line from 2 points and returns the value @ x
-    def __point_slope_fit(self, x_1, y_1, x_2, y_2, x):
-        m = 0
-        if x_2 != x_1:
-            m = (y_2 - y_1) / (x_2 - x_1)
-        return m * (x - x_1) + y_1
-
-    # go through all topics and calculate the values
-    def __second_pass(self, ep):
-        print("\n--------------------------------------------------------------\nperforming the second pass...")
-
+    def _interpolate_tf(self):
+        """
+        Compute interpolations given recorded TF frames
+        """
         # TODO vestigial remnants of when we used to track this
         tf_topics = []
         for side in self.tracked_sides:
             tf_topics.extend(self.__get_tf_topics(side))
 
-        print("tf topics:", tf_topics)
         for i, ts in enumerate(self.timestamps):
-        #     # print()
-            self.pro_dataset.add("data/timestamp", ts)
             #   1. Go through the transformations and use the buffer to look up the state at that time
             for tf_t in tf_topics:
-                # print(tf_t)
                 try:
                     tr = bag_proc.buffer.lookup_transform("victor_root", tf_t, Time(nanoseconds=ts))
-                    # print(tr)
-                    self.pro_dataset.add("pose/" + tf_t + "_translation", ros_msg_to_arr(tr.transform.translation))
-                    self.pro_dataset.add("pose/" + tf_t + "_rotation", ros_msg_to_arr(tr.transform.rotation))
+                    self.proc_dataset.add("pose/" + tf_t + "_translation", ros_msg_to_arr(tr.transform.translation))
+                    self.proc_dataset.add("pose/" + tf_t + "_rotation", ros_msg_to_arr(tr.transform.rotation))
                 # except tf2.LookupException: pass # if the topic has no data, ignore (happens when only one of the arms was used)
                 except tf2.ExtrapolationException:  # TODO if the topic has run out of the data, fill the rest with the last known value
                     tr = bag_proc.buffer.lookup_transform("victor_root", tf_t, Time()) # get latest message
-                    self.pro_dataset.add("pose/" + tf_t + "_translation", ros_msg_to_arr(tr.transform.translation))
-                    self.pro_dataset.add("pose/" + tf_t + "_rotation", ros_msg_to_arr(tr.transform.rotation))
+                    self.proc_dataset.add("pose/" + tf_t + "_translation", ros_msg_to_arr(tr.transform.translation))
+                    self.proc_dataset.add("pose/" + tf_t + "_rotation", ros_msg_to_arr(tr.transform.rotation))
                     # ALTERNATIVELY do the latest data from the dict
-                    # self.pro_dataset.add("pose/" + topic + "/translation", self.pro_dataset["pose/" + topic  + "/translation"][-1])
-                    # self.pro_dataset.add("pose/" + topic + "/rotation", self.pro_dataset["pose/" + topic  + "/rotation"][-1])
+                    # self.proc_dataset.add("pose/" + topic + "/translation", self.proc_dataset["pose/" + topic  + "/translation"][-1])
+                    # self.proc_dataset.add("pose/" + topic + "/rotation", self.proc_dataset["pose/" + topic  + "/rotation"][-1])
 
-            #   2. Go through the rest of the variables and do linear approx 
-            for topic in self.tracked_topics.keys():
-                try:
-                    ts_arr = self.raw_dataset[topic + "/timestamp"]
-                    # high_i = np.where(ts_arr > ts)
-                    # low_i = ts_arr[ts_arr < ts].max()
-                    low_i = np.searchsorted(ts_arr, ts, "right") - 1
-                    high_i = np.searchsorted(ts_arr, ts, "left")
-                    # print(ts)
-                    # print(low_i, high_i, sep="\t")
-                    # print(ts_arr[low_i], ts,  ts_arr[high_i], sep="\t")
-                    # print(ts_arr[high_i] - ts_arr[low_i])
+    def _compute_bounds(self, ts_arr: np.ndarray, targets: np.ndarray):
+        """
+        Given a sorted ts_arr and arbitrary targets, return vectorized low/high indices and masks.
+        low_i  = index of last ts <= target  (clipped to [0, n-1])
+        high_i = index of first ts >= target (clipped to [0, n-1])
+        mask_left  : target < ts_arr[0]
+        mask_right : target > ts_arr[-1]
+        """
+        n = len(ts_arr)
+        high_raw = np.searchsorted(ts_arr, targets, side="left")
+        low_raw = high_raw - 1
 
-                    # TODO if we are now extrapolating
-                    if high_i >= len(ts_arr):
-                        for value_topic in self.tracked_topics[topic]:
-                            key = topic + "/" + value_topic 
-                            # key=value_topic
-                            # self.pro_dataset.add(key, self.pro_dataset[key][-1])  # last timestamp value
-                            # TODO removed per arm directories for data
-                            # self.pro_dataset.add(key, self.raw_dataset[key][-1])    # last known value
-                            s_key = "data/" + topic.split("/")[-1] + "_" + value_topic
-                            # print(s_key)
-                            # self.pro_dataset.add(key, self.raw_dataset[key][-1])    # last known value
-                            self.pro_dataset.add(s_key, self.raw_dataset[key][-1])    # last known value
-                            # self.pro_dataset.add(key, np.full(self.pro_dataset[key][-1].shape, np.nan)) # NaNs
-                    else:
-                        for value_topic in self.tracked_topics[topic]:
-                            key = topic + "/" + value_topic 
-                            s_key = "data/" + topic.split("/")[-1] + "_" + value_topic
-                            # print(s_key)
+        mask_left = (low_raw < 0)
+        mask_right = (high_raw >= n)
 
-                            # to interpolate or not to interpolate that is the question - Kirillpeare 2025
-                            if self.use_interpolation:
-                                self.pro_dataset.add(s_key, self.__point_slope_fit(
-                                    x_1 = ts_arr[low_i], y_1 = self.raw_dataset[key][low_i],
-                                    x_2 = ts_arr[high_i], y_2 = self.raw_dataset[key][high_i],
-                                    x = ts
-                                ))
-                            else:
-                                self.pro_dataset.add(s_key, self.raw_dataset[key][low_i])
-                except KeyError:    # if a topic doesn't have data (like when only one arm was used)
-                    print("ouch", topic, "missing")
-                    pass
+        low_clip = np.clip(low_raw, 0, n - 1)
+        high_clip = np.clip(high_raw, 0, n - 1)
+        return low_clip, high_clip, mask_left, mask_right
+
+
+    def _sample_series(self, 
+        ts_arr: np.ndarray,
+        y: np.ndarray,
+        targets: np.ndarray,
+        *,
+        mode: str = "linear",
+        left_policy: str = "first",   # or "nan"
+        right_policy: str = "last"    # or "nan"
+    ) -> np.ndarray:
+        """
+        Vectorized sampling of a time series y(ts_arr) at arbitrary targets.
+        Supports:
+        - mode="linear" : point-slope interpolation between bounding samples
+        - mode="left"   : step function (last-known value on the left)
+        Extrapolation:
+        - left_policy: 'first' or 'nan'
+        - right_policy: 'last' or 'nan'
+        Shapes:
+        - ts_arr: (N,)
+        - y: (N, ...)  (can be multi-dim per timestep)
+        - targets: (M,)
+        - returns: (M, ...)  matching y’s trailing dims
+        """
+        low_i, high_i, mask_left, mask_right = self._compute_bounds(ts_arr, targets)
+        y_low = y[low_i]
+        if mode == "left":
+            out = y_low.copy()
+        else:
+            # linear interpolation
+            x1 = ts_arr[low_i]
+            x2 = ts_arr[high_i]
+            dx = x2 - x1
+            same = (dx == 0)
+
+            # prepare broadcasting-friendly slope dtype
+            slope_dtype = np.result_type(y_low, np.float64)
+            slope = np.zeros_like(y_low, dtype=slope_dtype)
+            valid = ~same
+            if np.any(valid):
+                # Broadcast (y_high - y_low) / dx over trailing dims
+                slope[valid] = (y[high_i][valid] - y_low[valid]) / dx[valid, ...]
+            out = y_low + slope * (targets - x1)[(...,) + (None,) * (y.ndim - 1)]
+
+            # fall back where x2==x1
+            if np.any(same):
+                out[same] = y_low[same]
+
+        # Extrapolation policies
+        if right_policy == "last":
+            out[mask_right] = y[-1]
+        elif right_policy == "nan":
+            out[mask_right] = np.nan
+
+        if left_policy == "first":
+            out[mask_left] = y[0]
+        elif left_policy == "nan":
+            out[mask_left] = np.nan
+
+        return out
+
+    def _interpolate_other_values(self, topic, ts_arr, ts_all, do_linear, value_topics):
+        """
+        Compute interpolated or not,
+        used by both regular processing AND plateau removal
+        """
+        rtn = {}
+        for value_topic in value_topics:
+            key = f"{topic}/{value_topic}"
+            s_key = f"data/{topic.split('/')[-1]}_{value_topic}"
+            if key not in self.raw_dataset:
+                print("ouch", key, "missing")
+                continue
+            y = np.asarray(self.raw_dataset[key])
+            mode = "linear" if do_linear else "left"
+            out = self._sample_series(
+                ts_arr, y, ts_all,
+                mode=mode,
+                left_policy="first",
+                right_policy="last",
+            )
+            rtn[s_key] = [row for row in out]
+        return rtn
+
+    def _add_other_values(self):
+        """
+        Vectorized interpolation/left-hold for all tracked topics & values.
+        """
+        ts_all = np.asarray(self.timestamps)
+        do_linear = bool(self.use_interpolation)
+
+        for topic, value_topics in self.tracked_topics.items():
+            ts_arr = np.asarray(self.raw_dataset[topic + "/timestamp"])
+            rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, 
+                                                      do_linear, value_topics)
+            # Add to dict
+            for s_key, out in rtn_dict.items():
+                self.proc_dataset[s_key] = out
+
+    def _add_vision(self):
+        """
+        Add Zivid camera data to the processed dataset.
+        """
+        if not self.use_vision:
+            return
+        
+        img_h5 = None
+        for ts in self.timestamps:
+            img_i = np.searchsorted(self.raw_dataset["/zivid/timestamp"], ts) 
+            fid = self.raw_dataset["/zivid/frame_id"][img_i]
+            chunk_id = fid // 50
+            offset_id = fid % 50
+            if img_h5 is None or offset_id == 0:   # we've finished one chunk -> load next
+                img_h5 = h5py.File(os.path.join(self.img_dir, "processed_chunk_" + str(chunk_id) + ".h5"))
+            try:
+                self.proc_dataset.add("data/image", img_h5["rgb"][offset_id])
+            except IndexError:
+                print("index", offset_id,"in chunk", chunk_id, "is out of bounds, using last image")
+                self.proc_dataset.add("data/image", img_h5["rgb"][-1])
+
+    def _compute_finger_data_arrays(self):
+        """
+        Helper method to compute finger data arrays.
+        Returns tuple of (pos, req, pos_prev, req_prev) arrays.
+        """
+        diffs = ["finger_a", "finger_b", "finger_c", "scissor"]
+        finger_topics = [f"data/gripper_status_{d}_status" for d in diffs]
+
+        # Each entry is a list where entry[t] is something like [req, pos]
+        # Stack to arrays of shape (T, 2) per finger.
+        series = [np.asarray(self.proc_dataset[topic]) for topic in finger_topics]  # 4 × (T, 2)
+
+        # Columns: 0=request, 1=position
+        # Build (T, 4) matrices by column-stacking across fingers.
+        pos = np.column_stack([s[:, 1] for s in series])  # (T, 4)
+        req = np.column_stack([s[:, 0] for s in series])  # (T, 4)
+
+        # Previous values: shift down by 1; first row equals current (your rule for i==0).
+        pos_prev = pos.copy()
+        pos_prev[1:] = pos[:-1]
+        # pos_prev[0] already equals pos[0] by copy(); same effect as your offset logic.
+
+        req_prev = req.copy()
+        req_prev[1:] = req[:-1]
+        
+        return pos, req, pos_prev, req_prev
+
+    def _add_finger_specifics(self):
+        """
+        Vectorized: build everything at once
+        """
+        pos, req, pos_prev, req_prev = self._compute_finger_data_arrays()
+
+        # Write back as lists of per-timestep vectors to match SmartDict.add semantics.
+        # If you prefer to keep them as arrays, you can also just assign the arrays directly.
+        self.proc_dataset["data/gripper_status_position"] = [row for row in pos]
+        self.proc_dataset["data/gripper_status_position_request"] = [row for row in req]
+        self.proc_dataset["data/gripper_status_position_previous"] = [row for row in pos_prev]
+        self.proc_dataset["data/gripper_status_position_request_previous"] = [row for row in req_prev]
+
+    def _add_wrench(self):
+        """
+        Vectorized wrench windows: for each interval [t_{i-1}, t_i],
+        generate wrench_ratio samples, sampled with "left" (last-known) policy.
+        For i==0, window equals wrench at the first timestamp repeated.
+        """
+        T = len(self.timestamps)
+        if T == 0:
+            return
+
+        # Build all window targets in one go: shape (T, R)
+        t_curr = np.asarray(self.timestamps)
+        t_prev = t_curr.copy()
+        if T > 1:
+            t_prev[1:] = t_curr[:-1]   # previous timestamp per row; t_prev[0] == t_curr[0]
+
+        R = int(self.wrench_ratio)
+        # alpha in [0,1] with R points; broadcasting to (T, R)
+        alpha = np.linspace(0.0, 1.0, R, dtype=np.float64)
+        window_ts = (t_prev[:, None] * (1.0 - alpha)[None, :]) + (t_curr[:, None] * alpha[None, :])
+
+        # Flatten to (T*R,) for a single vectorized sampling per topic
+        window_ts_flat = window_ts.reshape(-1)
+
+        for wrench_topic in self.wrench_topics:
+            ts_arr = np.asarray(self.raw_dataset[wrench_topic + "/timestamp"])
+            y = np.asarray(self.raw_dataset[wrench_topic + "/data"])  # shape (N, D?) or (N,)
+            s_key = f"data/{wrench_topic.split('/')[-1]}_data_window"
+
+            # Sample with last-known (left) policy, clamp right to last, left to first
+            sampled = self._sample_series(
+                ts_arr, y, window_ts_flat,
+                mode="left",
+                left_policy="first",
+                right_policy="last",
+            )
+            # Reshape back to (T, R, D?) and store as list-of-(R,D) per timestep
+            new_shape = (T, R) + y.shape[1:]
+            sampled = sampled.reshape(new_shape)
+
+            # If you want the first row equal to "wrench @ first ts" repeated R times,
+            # this already holds because t_prev[0] == t_curr[0].
+            self.proc_dataset[s_key] = [sampled[i] for i in range(T)]
+
+    def _add_progress(self):
+        """Auxiliary learning progress prediction"""
+        if not self.use_aux_learn:
+            return
+        joint_angles = np.stack(self.proc_dataset["data/joint_angles_data"][:])
+        gripper_request = np.stack(self.proc_dataset["data/gripper_status_position_request"])[:,0]
+        progress = np.linspace(0.0, 1.0, len(self.timestamps))                # 1
+        
+        # Stack together
+        for i, ts in enumerate(self.timestamps):
+            self.proc_dataset.add("data/robot_act_aux", np.hstack([                      # TOTAL dim 9
+                joint_angles[i], gripper_request[i], progress[i]
+            ]))
+
+    def _add_extra_fields(self):
+        """
+        Add any extra fields to the processed dataset as needed.
+        Vectorized end-to-end with proper indexing.
+        """
+        # --- Pull arrays once ---
+        q        = np.stack(self.proc_dataset["data/joint_angles_data"])                  # (N, 7)
+        g_req    = np.stack(self.proc_dataset["data/gripper_status_position_request"])[:,0:1]    # (N,) or (N,1)
+        # ensure column shape for hstack
+        g_req_c  = g_req.reshape(-1, 1)                                                         # (N, 1)
+
+        ee_tgt_t = np.stack(self.proc_dataset["pose/target_victor_right_tool0_translation"])  # (N, 3)
+        ee_tgt_r = np.stack(self.proc_dataset["pose/target_victor_right_tool0_rotation"])     # (N, 4)
+
+        q_meas   = np.stack(self.proc_dataset["data/motion_status_measured_joint_position"])  # (N, 7)
+        g_meas   = np.stack(self.proc_dataset["data/gripper_status_position"])                # (N, 4)
+
+        ee_cur_t = np.stack(self.proc_dataset["pose/victor_right_tool0_translation"])         # (N, 3)
+        ee_cur_r = np.stack(self.proc_dataset["pose/victor_right_tool0_rotation"])            # (N, 4)
+
+        # --- Vectorized action stacks ---
+        robot_act    = np.hstack([q, g_req_c])                            # (N, 8)
+        robot_act_ee = np.hstack([ee_tgt_t, ee_tgt_r, g_req_c])           # (N, 8)
+
+        # --- "Previous action" per timestep (i=0 uses last) ---
+        prev_robot_act    = np.roll(robot_act,    shift=1, axis=0)        # (N, 8)
+        prev_robot_act_ee = np.roll(robot_act_ee, shift=1, axis=0)        # (N, 8)
+
+        # --- Observations (current measurements + previous action) ---
+        robot_obs    = np.hstack([prev_robot_act,    q_meas, g_meas])     # (N, 8+7+4=19)
+        robot_obs_ee = np.hstack([prev_robot_act_ee, ee_cur_t, ee_cur_r, g_meas])  # (N, 8+3+4+4=19)
+
+        for i, ts in enumerate(self.timestamps):
+            self.proc_dataset.add("data/robot_act", robot_act[i])
+            self.proc_dataset.add("data/robot_act_ee", robot_act_ee[i])
+            self.proc_dataset.add("data/robot_obs", robot_obs[i])
+            self.proc_dataset.add("data/robot_obs_ee", robot_obs_ee[i])
+
             
-            if self.use_vision:
-                img_i = np.searchsorted(self.raw_dataset["/zivid/timestamp"], ts) 
-                fid = self.raw_dataset["/zivid/frame_id"][img_i]
-                if self.img_h5 is None or fid % 50 == 0:   # we've finished one chunk -> load next
-                    self.img_h5 = h5py.File(os.path.join(self.img_dir, "processed_chunk_" + str(int(fid / 50)) + ".h5"))
-                try:
-                    self.pro_dataset.add("data/image", self.img_h5["rgb"][fid % 50])
-                except IndexError:
-                    print("index", fid % 50,"in chunk", int(fid / 50), "is out of bounds, using last image")
-                    self.pro_dataset.add("data/image", self.img_h5["rgb"][-1])
-            else:
-                # self.pro_dataset.add("data/image", np.zeros((2,2,3)))
-                pass
-
-            # add dedicated position and position request groups
-            self.pro_dataset.add("data/gripper_status_position", np.hstack([
-                self.pro_dataset["data/gripper_status_finger_a_status"][-1][1],   # 1
-                self.pro_dataset["data/gripper_status_finger_b_status"][-1][1],   # 1
-                self.pro_dataset["data/gripper_status_finger_c_status"][-1][1],   # 1
-                self.pro_dataset["data/gripper_status_scissor_status"][-1][1],    # 1
-            ]))
-            
-            self.pro_dataset.add("data/gripper_status_position_request", np.hstack([
-                self.pro_dataset["data/gripper_status_finger_a_status"][-1][0],   # 1
-                self.pro_dataset["data/gripper_status_finger_b_status"][-1][0],   # 1
-                self.pro_dataset["data/gripper_status_finger_c_status"][-1][0],   # 1
-                self.pro_dataset["data/gripper_status_scissor_status"][-1][0],    # 1
-            ]))
-
-            offset = -2
-            if i == 0: # if the first timestamp, we don't have a previous timestamp, so set it equal to the current one
-                offset = -1
-
-            self.pro_dataset.add("data/gripper_status_position_previous", np.hstack([
-                self.pro_dataset["data/gripper_status_finger_a_status"][offset][1],   # 1
-                self.pro_dataset["data/gripper_status_finger_b_status"][offset][1],   # 1
-                self.pro_dataset["data/gripper_status_finger_c_status"][offset][1],   # 1
-                self.pro_dataset["data/gripper_status_scissor_status"][offset][1],    # 1
-            ]))
-            
-            self.pro_dataset.add("data/gripper_status_position_request_previous", np.hstack([
-                self.pro_dataset["data/gripper_status_finger_a_status"][offset][0],   # 1
-                self.pro_dataset["data/gripper_status_finger_b_status"][offset][0],   # 1
-                self.pro_dataset["data/gripper_status_finger_c_status"][offset][0],   # 1
-                self.pro_dataset["data/gripper_status_scissor_status"][offset][0],    # 1
-            ]))
-
-            #   3. Go through the wrench topics and add them to the dataset
-            for wrench_topic in self.wrench_topics:
-                key = wrench_topic + "/data"   
-                s_key = "data/" + wrench_topic.split("/")[-1] + "_data_window"
-
-                if i == 0: # if the first timestamp, we don't have a wrench window before it, so set it equal to the wrench @ first timestamp
-                    self.pro_dataset.add(s_key, np.tile(self.raw_dataset[wrench_topic + "/data"][0], (self.wrench_ratio,1)))
-                    continue
-
-                window_ts = np.linspace(self.timestamps[i-1], ts, self.wrench_ratio)
-                window_arr = []
-                for wts in window_ts:
-                    try:
-                        ts_arr = self.raw_dataset[wrench_topic + "/timestamp"]
-                        
-                        low_i = np.searchsorted(ts_arr, wts, "right") - 1
-                        high_i = np.searchsorted(ts_arr, wts, "left")
-
-                        # if we are now extrapolating   NOTE: other extrapolation/interpolation methods can be seen in step 2
-                        if high_i >= len(ts_arr):
-                            window_arr.append(self.raw_dataset[key][-1])    # last known value
-                        else:
-                            if self.use_interpolation:
-                                window_arr.append(self.__point_slope_fit(
-                                    x_1 = ts_arr[low_i], y_1 = self.raw_dataset[key][low_i],
-                                    x_2 = ts_arr[high_i], y_2 = self.raw_dataset[key][high_i],
-                                    x = wts
-                                ))
-                            else:
-                                window_arr.append(self.raw_dataset[key][low_i])
-                    except KeyError:    # if a topic doesn't have data (like when only one arm was used)
-                        print("ouch", topic, "missing")
-                        pass
-                
-                self.pro_dataset.add(s_key, np.array(window_arr))
-
-
-
-            # 4. Concatenate the robot observations and actions
-            if self.use_aux_learn:  # if we are trying to get the model to learn auxiliary tasks (like how along the trajectory progress it is)
-                self.pro_dataset.add("data/robot_act_aux", np.hstack([                      # TOTAL dim 9
-                    self.pro_dataset["data/joint_angles_data"][-1],                     # 7
-                    self.pro_dataset["data/gripper_status_position_request"][-1][0],       # 1
-                    i / (len(self.timestamps) - 1)                                         # 1 
-                ]))
-
-            self.pro_dataset.add("data/robot_act", np.hstack([                      # TOTAL dim 8
-                self.pro_dataset["data/joint_angles_data"][-1],                     # 7
-                self.pro_dataset["data/gripper_status_position_request"][-1][0],       # 1
-            ]))
-
-            self.pro_dataset.add("data/robot_act_ea", np.hstack([                    # total dim 8
-                self.pro_dataset["pose/target_victor_right_tool0_translation"][-1], # 3 dim
-                self.pro_dataset["pose/target_victor_right_tool0_rotation"][-1],    # 4
-                self.pro_dataset["data/gripper_status_position_request"][-1][0],       # 1
-            ]))                
-
-            if i == 0: # if the first timestamp, we don't have a robot action before it, so set it equal to the robot action @ first timestamp
-                self.pro_dataset.add("data/robot_obs", np.hstack([                      #TOTAL dim: 19
-                    self.pro_dataset["data/robot_act"][-1],                             # 8
-                    self.pro_dataset["data/motion_status_measured_joint_position"][-1], # 7
-                    self.pro_dataset["data/gripper_status_position"][-1],               # 4
-                ])) 
-                # print(self.pro_dataset["data/robot_obs"][-1].shape)
-                self.pro_dataset.add("data/robot_obs_ea", np.hstack([                   # total dim: 19
-                    self.pro_dataset["data/robot_act_ea"][-1],                             # 8
-                    self.pro_dataset["pose/victor_right_tool0_translation"][-1],        # 3
-                    self.pro_dataset["pose/victor_right_tool0_rotation"][-1],           # 4 
-                    self.pro_dataset["data/gripper_status_position"][-1],       # 4
-                ]))
-            else:
-                # TODO for robot_obs -> [previous act, curr observaitons]
-                self.pro_dataset.add("data/robot_obs", np.hstack([                      #TOTAL dim: 19
-                    self.pro_dataset["data/robot_act"][-2],                             # 8
-                    self.pro_dataset["data/motion_status_measured_joint_position"][-1], # 7
-                    self.pro_dataset["data/gripper_status_position"][-1],               # 4
-                ])) 
-
-                self.pro_dataset.add("data/robot_obs_ea", np.hstack([                   # total dim: 19
-                    self.pro_dataset["data/robot_act_ea"][-2],                             # 8
-                    self.pro_dataset["pose/victor_right_tool0_translation"][-1],        # 3
-                    self.pro_dataset["pose/victor_right_tool0_rotation"][-1],           # 4 
-                    self.pro_dataset["data/gripper_status_position"][-1],       # 4
-                ]))                  
-
-            # print(self.pro_dataset["data/robot_act"][-1].shape)
-
-        self.pro_dataset.add("meta/episode_ends",self.last_ep_end + len(self.pro_dataset["data/timestamp"]))
-        self.last_ep_end += len(self.pro_dataset["data/timestamp"])
-        self.pro_dataset.add("meta/episode_name", str(ep))
+    def _add_episode_ends(self, ep):
+        """As titled"""
+        self.proc_dataset.add("meta/episode_ends",self.last_ep_end + len(self.proc_dataset["data/timestamp"]))
+        self.last_ep_end += len(self.proc_dataset["data/timestamp"])
+        self.proc_dataset.add("meta/episode_name", str(ep))
 
         # if self.use_aux_learn: # normalize the last dimension for progress tracking
-        #     print(np.array(self.pro_dataset["data/robot_act"])[..., -1], i, len(self.timestamps))
-        #     self.pro_dataset["data/robot_act"][..., -1] = self.pro_dataset["data/robot_act"][..., -1] / i
-        #     self.pro_dataset["data/robot_act_ea"][..., -1] = self.pro_dataset["data/robot_act_ea"][..., -1] / i
+        #     print(np.array(self.proc_dataset["data/robot_act"])[..., -1], i, len(self.timestamps))
+        #     self.proc_dataset["data/robot_act"][..., -1] = self.proc_dataset["data/robot_act"][..., -1] / i
+        #     self.proc_dataset["data/robot_act_ee"][..., -1] = self.proc_dataset["data/robot_act_ee"][..., -1] / i
+        
 
-        print("second pass COMPLETE! \n--------------------------------------------------------------\n")
-
-    def __wrench_pass(self):
-        print("\n--------------------------------------------------------------\nperforming the wrench pass...")
-        # go through the wrench topics and add them to the dataset
-
-        print("wrench pass COMPLETE! \n--------------------------------------------------------------\n")
 if __name__ == "__main__":
     # print("postprocessing ......")
 
     parser = argparse.ArgumentParser(description = "A post-processor script to take the raw dataset and create a processed dataset for training a Diffusion Policy model")
     parser.add_argument("-d", "--data", metavar="PATH_TO_DATA_IN_DIR",help = "path to the raw dataset directory",
-                        required = False, default = "data_in")
+                        required=True)
     parser.add_argument("-p", "--processed", metavar="PATH_TO_PROCESSED_FILE", help = "path to save the processed file at",
-                         required = False, default = "datasets/data_out/dspro_08_06_new50_no_interp.zarr.zip")
+                         required=True)
     parser.add_argument("-s", "--side", help = "which should the dataset include", choices=["left", "right"],
-                         required = False, default = "right")
+                         required=True)
     parser.add_argument("-v", "--vision", help = "should the dataset use images", choices=["true", "false"],
                          required = False, default = "true")
     parser.add_argument("-a", "--aux", help = "should the model learn auxilary tasks", choices=["true", "false"],
@@ -471,32 +668,28 @@ if __name__ == "__main__":
     vision = argument.vision
     aux = argument.aux
     inter = argument.interpolation
-    # optional args21728129481 - 21693698127
-    # bag_proc = BagPostProcessor("datasets/test_ds/ds_raw432.h5")
-
-    # create the zarr and h5 files
-    # zp = zarr.ZipStore(path=processed_path, mode="w")
-    # h5f = h5py.File("datasets/data_out/ds_processed.h5", mode='w')
 
     bag_proc = BagPostProcessor(side, vision == 'true', aux == 'true', inter == 'true')
     ep_i = 0
-    for ep_dir in os.listdir(data_in_dir):
-        bag_proc.post_process(data_in_dir, ep_dir)
-        if ep_i == 0:   # TODO ugly :(
-            store_zarr_dict_diff_data(processed_path, bag_proc.pro_dataset)
-            store_h5_dict("datasets/data_out/ds_processed.h5", bag_proc.pro_dataset)
-        else:
-            store_zarr_dict_diff_data_a(processed_path, bag_proc.pro_dataset)
-            store_h5_dict_a("datasets/data_out/ds_processed.h5", bag_proc.pro_dataset)        # self.pro_dataset.add("meta/episode_ends", 1)
+    os.makedirs("data/victor/tmp", exist_ok=True)
 
-        bag_proc.pro_dataset = SmartDict(backend="numpy")
+    pbar = tqdm.tqdm(os.listdir(data_in_dir), desc="Processing episodes")
+    for ep_dir in pbar:
+        bag_proc.proc_dataset = SmartDict(backend="numpy")
+        try:
+            bag_proc.post_process(data_in_dir, ep_dir)
+        except Exception as e:
+            print(f"Error processing {ep_dir}: {e}")
+            ep_i += 1
+            continue
+
+        # Then save
+        if ep_i == 0:   # TODO ugly :(
+            store_zarr_dict_diff_data(processed_path, bag_proc.proc_dataset)
+            store_h5_dict("data/victor/tmp/ds_processed.h5", bag_proc.proc_dataset)
+        else:
+            store_zarr_dict_diff_data_a(processed_path, bag_proc.proc_dataset)
+            store_h5_dict_a("data/victor/tmp/ds_processed.h5", bag_proc.proc_dataset)
         ep_i += 1
 
-    # ds_dir = Path(os.path.join("datasets", "test_ds"))d
-    # ds_dir.mkdir(parents=True, exist_ok=True)
-    
-    print()
-    
     print("saving processed dataset dict to", processed_path)
-    # store_zarr_dict_diff_data(processed_path, bag_proc.pro_dataset)
-    # store_h5_dict("datasets/data_out/ds_processed.h5", bag_proc.pro_dataset)

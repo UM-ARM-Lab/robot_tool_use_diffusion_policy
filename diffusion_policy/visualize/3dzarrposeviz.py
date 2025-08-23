@@ -22,8 +22,8 @@ def print_zarr_keys(name):
 if __name__ == "__main__":
     np.set_printoptions(suppress=True, precision=5, threshold=77777777)
     # dirf = zarr.open("baselines/diffusion_policy/pusht_cchi_v7_replay.zarr.zip", mode='r')
-    # dirf = zarr.open("datasets/data_out/dspro_07_22_no_wrench.zarr.zip", mode='r')
-    # zf = zarr.open("datasets/data_out/dspro_07_28_end_affector.zarr.zip", mode='r')
+    # dirf = zarr.open("data/victor/tmp//dspro_07_22_no_wrench.zarr.zip", mode='r')
+    # zf = zarr.open("data/victor/tmp//dspro_07_28_end_affector.zarr.zip", mode='r')
     zf = zarr.open("/home/KirillT/robot_tool_use_diffusion_policy/data/victor/victor_playback_data.zarr.zip", mode='r')
     print(zf.tree())    # view all topics and their hierarchy
     

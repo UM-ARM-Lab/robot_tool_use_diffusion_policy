@@ -7,9 +7,7 @@ import torch
 import multiprocessing as mp
 import ctypes
 import zarr 
-from .imagecodecs_numcodecs import Jpeg2k, register_codecs
-import tqdm
-
+from diffusion_policy.codecs.imagecodecs_numcodecs import Jpeg2k, register_codecs
 
 register_codecs()
 
@@ -185,9 +183,8 @@ def store_zarr_dict(path, data_dict, **ds_kwargs):
 # (using proper compression and chunking)
 def store_zarr_dict_diff_data(path, data_dict, **ds_kwargs):
     with zarr.ZipStore(path=path, mode="w") as zf:
-        for k, v in tqdm.tqdm(data_dict.items(), "Storing zarr dict into " + path):
+        for k, v in data_dict.items():
             v = np.array(v)
-            print(k)
             if v.ndim == 1:
                 zarr.array(data=v, path=k, store=zf, chunks=(1000))
             else:
@@ -203,26 +200,20 @@ def store_zarr_dict_diff_data(path, data_dict, **ds_kwargs):
                     chunk_shape = tuple(chunk_shape)
                     zarr.array(data=v, path=k, store=zf, chunks=chunk_shape)
 
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=r"Duplicate name: .*",
+    category=UserWarning,
+    module=r"zipfile"
+)
+
 # appends to an existing zarr
 def store_zarr_dict_diff_data_a(path, data_dict, **ds_kwargs):
     with zarr.ZipStore(path=path, mode="a") as zf:
-        for k, v in tqdm.tqdm(data_dict.items(), "Storing zarr dict into " + path):
+        for k, v in data_dict.items():
             v = np.array(v)
-            print(k)
-            
-            is_new = False
-            # print(zf.keylist())
-            # try:
-            #     print(k, zf[k])
-            #     # print(zf["data/timestampww"])
-            # except KeyError:
-            #     print("adding new key:", k)
-            #     is_new = True
-
             if v.ndim == 1:
-                # if is_new:
-                #     zarr.array(data=v, path=k, store=zf, chunks=(1000))
-                # else:
                 zarr.open_array(store=zf, path=k).append(v, axis=0)
             else:
                 if k == 'data/image':
@@ -239,9 +230,6 @@ def store_zarr_dict_diff_data_a(path, data_dict, **ds_kwargs):
                     chunk_shape = [1000]
                     chunk_shape.extend(np.array(v).shape[1:])
                     chunk_shape = tuple(chunk_shape)
-                    # if is_new:
-                    #     zarr.array(data=v, path=k, store=zf, chunks=chunk_shape)
-                    # else:
                     zarr.open_array(store=zf, path=k).append(v, axis=0)
 
 def find_best_checkpoint(model_path, epoch=None):

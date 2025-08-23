@@ -4,9 +4,9 @@ import zarr.hierarchy
 import zarr.storage
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 
-import h5py
-from utils.imagecodecs_numcodecs import register_codecs
+from diffusion_policy.codecs.imagecodecs_numcodecs import register_codecs
 register_codecs()
 
 def print_zarr_vals(obj):
@@ -20,12 +20,13 @@ def print_zarr_keys(name):
     print(name)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Visualize and inspect zarr.zip files")
+    parser.add_argument("-f", "--file", metavar="PATH_TO_ZARR_FILE", 
+                       help="path to the zarr.zip file to inspect", required=True)
+    args = parser.parse_args()
+
     np.set_printoptions(suppress=True, precision=5, threshold=77777777)
-    # dirf = zarr.open("baselines/diffusion_policy/pusht_cchi_v7_replay.zarr.zip", mode='r')
-    # dirf = zarr.open("datasets/data_out/dspro_07_22_no_wrench.zarr.zip", mode='r')
-    # dirf = zarr.open("data_in/ep_1/raw/ep_1.zarr.zip", mode='r')
-    # dirf = zarr.open("datasets/data_out/dspro_08_06_new50_no_interp.zarr.zip", mode='r')
-    dirf = zarr.open("/home/KirillT/robot_tool_use_diffusion_policy/data/victor/victor_data_08_06_new50_no_interp.zarr.zip", mode='r') 
+    dirf = zarr.open(args.file, mode='r') 
     print(dirf.tree())    # view all topics and their hierarchy
     # print(np.array(dirf["data/robot_obs"][20:100]))
     # print(dirf.visitvalues(print_zarr_vals))
