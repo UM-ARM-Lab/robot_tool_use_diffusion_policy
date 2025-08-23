@@ -1,0 +1,7 @@
+[submodule "diffusion_policy/env/isaacsim.armsdg"]
+	path = diffusion_policy/env/isaacsim.armsdg
+	url = git@github.com:UM-ARM-Lab/isaacsim.armsdg.git
+[submodule "diffusion_policy/real_world/ros-ws"]
+	path = diffusion_policy/real_world/ros-ws
+	url = git@github.com:UM-ARM-Lab/ros-ws.git
+	branch = robotool
