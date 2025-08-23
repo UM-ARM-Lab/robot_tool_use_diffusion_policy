@@ -15,14 +15,12 @@ register_codecs()
 if __name__ == "__main__":
     np.set_printoptions(suppress=True, precision=5)
     # dirf = zarr.open("baselines/diffusion_policy/pusht_cchi_v7_replay.zarr.zip", mode='r')
-    dirf = zarr.open("./data/victor/dspro_07_18.zarr.zip", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
+    dirf = zarr.open("./data/victor/victor_data_08_06_new50_no_interp.zarr.zip", mode='r') #"data/pusht/pusht_cchi_v7_replay.zarr"
     # Updated to use a working zarr file - output_data_1.zarr has compatibility issues with zarr v3 format
     # dirf = zarr.open("./data/victor/output.zarr.zip", mode='r')  # This file works
     # dirf = zarr.open("data/pusht/pusht_cchi_v7_replay.zarr", mode='r') #
     print(dirf.tree())
     # print(list(dirf.keys()))
-
-
     
     # Print all robot_act data
     print_keys = 'robot_act'
@@ -34,10 +32,6 @@ if __name__ == "__main__":
         print(f"\nAll {print_keys} values:")
 
         print(robot_act_data[-5:])
-        # for i, action in enumerate(robot_act_data):
-            # print(f"Step {i:3d}: {action}")
-            # if i >4:
-                # break
     else:
         print("robot_act not found in the zarr file")
         if 'data' in dirf:

@@ -51,8 +51,6 @@ class VictorDataset(BaseImageDataset):
         print(self.replay_buffer.keys())
         print(f"Loaded replay buffer with {self.replay_buffer}")
 
-        
-
         # Get the mask for validation episodes
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 
@@ -93,7 +91,7 @@ class VictorDataset(BaseImageDataset):
     def get_normalizer(self, mode='limits', **kwargs):
         data = {
             'action': self.replay_buffer['robot_act'],
-            'robot_obs'   : self.replay_buffer['robot_obs']
+            'robot_obs': self.replay_buffer['robot_obs']
             # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
             # 'wrench': self.replay_buffer['wrench'],#[...,:2]
             # 'gripper_status': self.replay_buffer['gripper_status']
