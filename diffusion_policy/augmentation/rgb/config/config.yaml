@@ -1,0 +1,22 @@
+input_zarr: /home/pannaga/Documents/ARM_Lab/dspro_07_30_single_ep.zarr 
+output_zarr: /home/pannaga/Documents/ARM_Lab/dspro_07_30_single_ep_AUGMENTED.zarr 
+sam2_json: /home/pannaga/Documents/ARM_Lab/episode_aug/config/masks.json
+work_size: [512, 512]
+
+ 
+inpaint:
+  enabled: true
+  method: telea  # telea | ns | none
+work_size: [512, 512]
+
+prefpaint:
+  model: kd5678/prefpaint-v1.0
+  device: cuda
+  mode: background        # or "sequence"
+  prompt: "The inside of a ship's engine room, ..."
+  eta: 0.7
+  steps: 25
+  guidance_scale: null
+  seed: 123
+  ref_idx: 0
+ 
