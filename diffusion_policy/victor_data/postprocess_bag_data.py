@@ -58,9 +58,9 @@ class BagPostProcessor():
         aux,
         inter,
         hz = 10,
-        wrench_ratio = 30
+        wrench_hist_window = 30
     ):
-        self.wrench_ratio = wrench_ratio    # number of wrench messages per window
+        self.wrench_hist_window = int(wrench_hist_window)    # number of wrench messages per window
         self.freq = 1/hz # NOTE: timestamps are in ns   # TODO no longer needed due to the zivid times
 
         self.use_vision = vis # should the processed ds include images or not
@@ -384,6 +384,9 @@ class BagPostProcessor():
     ) -> np.ndarray:
         """
         Vectorized sampling of a time series y(ts_arr) at arbitrary targets.
+        - ts_arr: timestamps of ROS data
+        - y: values to be sampled
+        - targets: target timestamps to get sample from
         Supports:
         - mode="linear" : point-slope interpolation between bounding samples
         - mode="left"   : step function (last-known value on the left)
@@ -534,48 +537,41 @@ class BagPostProcessor():
 
     def _add_wrench(self):
         """
-        Vectorized wrench windows: for each interval [t_{i-1}, t_i],
-        generate wrench_ratio samples, sampled with "left" (last-known) policy.
-        For i==0, window equals wrench at the first timestamp repeated.
+        Add wrench history windows: for each processed timestamp, 
+        find the corresponding position in raw wrench data and take the last N values as history.
+        Pad left with the initial value if there aren't enough historical values.
         """
         T = len(self.timestamps)
         if T == 0:
             return
 
-        # Build all window targets in one go: shape (T, R)
-        t_curr = np.asarray(self.timestamps)
-        t_prev = t_curr.copy()
-        if T > 1:
-            t_prev[1:] = t_curr[:-1]   # previous timestamp per row; t_prev[0] == t_curr[0]
+        N = int(self.wrench_hist_window)  # Number of historical wrench values to include
 
-        R = int(self.wrench_ratio)
-        # alpha in [0,1] with R points; broadcasting to (T, R)
-        alpha = np.linspace(0.0, 1.0, R, dtype=np.float64)
-        window_ts = (t_prev[:, None] * (1.0 - alpha)[None, :]) + (t_curr[:, None] * alpha[None, :])
-
-        # Flatten to (T*R,) for a single vectorized sampling per topic
-        window_ts_flat = window_ts.reshape(-1)
-
+        # N = history length, D = feature dim, T = #processed timestamps, M = #wrench samples
         for wrench_topic in self.wrench_topics:
-            ts_arr = np.asarray(self.raw_dataset[wrench_topic + "/timestamp"])
-            y = np.asarray(self.raw_dataset[wrench_topic + "/data"])  # shape (N, D?) or (N,)
+            wrench_ts_arr = np.asarray(self.raw_dataset[f"{wrench_topic}/timestamp"])   # (M,)
+            wrench_data   = np.asarray(self.raw_dataset[f"{wrench_topic}/data"])        # (M, D)
             s_key = f"data/{wrench_topic.split('/')[-1]}_data_window"
 
-            # Sample with last-known (left) policy, clamp right to last, left to first
-            sampled = self._sample_series(
-                ts_arr, y, window_ts_flat,
-                mode="left",
-                left_policy="first",
-                right_policy="last",
-            )
-            # Reshape back to (T, R, D?) and store as list-of-(R,D) per timestep
-            new_shape = (T, R) + y.shape[1:]
-            sampled = sampled.reshape(new_shape)
+            # Indices of the first sample >= ts (rightmost insert pos) — includes sample at ts if equal
+            end_idx = np.searchsorted(wrench_ts_arr, self.timestamps, side='right')     # (T,)
 
-            # If you want the first row equal to "wrench @ first ts" repeated R times,
-            # this already holds because t_prev[0] == t_curr[0].
-            self.proc_dataset[s_key] = [sampled[i] for i in range(T)]
+            # Front-pad with N copies of the first sample so early timestamps auto-pad
+            pad      = np.repeat(wrench_data[[0]], N, axis=0)                           # (N, D)
+            data_pad = np.vstack([pad, wrench_data])                                    # (M+N, D)
 
+            # Build all sliding windows once: shape (M+1, N, D)
+            # windows_all[i] == last N rows ending at original index i (exclusive)
+            windows_all = np.lib.stride_tricks.sliding_window_view(
+                data_pad, window_shape=(N,), axis=0
+            )                                                                            # (M+1, N, D)
+
+            # Gather the window for each processed timestamp: shape (T, N, D)
+            wrench_windows = windows_all[end_idx]
+
+            # If your downstream expects a list of (N, D) arrays per timestep:
+            self.proc_dataset[s_key] = [w for w in wrench_windows]
+            
     def _add_progress(self):
         """Auxiliary learning progress prediction"""
         if not self.use_aux_learn:
@@ -601,14 +597,14 @@ class BagPostProcessor():
         # ensure column shape for hstack
         g_req_c  = g_req.reshape(-1, 1)                                                         # (N, 1)
 
-        ee_tgt_t = np.stack(self.proc_dataset["pose/target_victor_right_tool0_translation"])  # (N, 3)
-        ee_tgt_r = np.stack(self.proc_dataset["pose/target_victor_right_tool0_rotation"])     # (N, 4)
+        ee_tgt_t = np.stack(self.proc_dataset["data/target_victor_right_tool0_translation"])  # (N, 3)
+        ee_tgt_r = np.stack(self.proc_dataset["data/target_victor_right_tool0_rotation"])     # (N, 4)
 
         q_meas   = np.stack(self.proc_dataset["data/motion_status_measured_joint_position"])  # (N, 7)
         g_meas   = np.stack(self.proc_dataset["data/gripper_status_position"])                # (N, 4)
 
-        ee_cur_t = np.stack(self.proc_dataset["pose/victor_right_tool0_translation"])         # (N, 3)
-        ee_cur_r = np.stack(self.proc_dataset["pose/victor_right_tool0_rotation"])            # (N, 4)
+        ee_cur_t = np.stack(self.proc_dataset["data/victor_right_tool0_translation"])         # (N, 3)
+        ee_cur_r = np.stack(self.proc_dataset["data/victor_right_tool0_rotation"])            # (N, 4)
 
         # --- Vectorized action stacks ---
         robot_act    = np.hstack([q, g_req_c])                            # (N, 8)
@@ -622,6 +618,7 @@ class BagPostProcessor():
         robot_obs    = np.hstack([prev_robot_act,    q_meas, g_meas])     # (N, 8+7+4=19)
         robot_obs_ee = np.hstack([prev_robot_act_ee, ee_cur_t, ee_cur_r, g_meas])  # (N, 8+3+4+4=19)
 
+        # Even though compute is parallelized, adding is still sequential to maintain shapes
         for i, ts in enumerate(self.timestamps):
             self.proc_dataset.add("data/robot_act", robot_act[i])
             self.proc_dataset.add("data/robot_act_ee", robot_act_ee[i])

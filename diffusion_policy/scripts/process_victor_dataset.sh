@@ -1,6 +1,6 @@
 #!/bin/bash
 # configure which files to process
-DATA_IN_DIR="$HOME/datasets/robotool"
+DATA_IN_DIR="$HOME/datasets/robotool_test"
 DATA_OUT_DIR="$HOME/datasets/robotool_processed"
 LN_OUT_DIR="$DP_PROJECT_ROOT/data/victor"
 

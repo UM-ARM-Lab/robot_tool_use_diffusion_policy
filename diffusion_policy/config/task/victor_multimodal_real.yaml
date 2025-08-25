@@ -1,0 +1,59 @@
+name: victor_multimodal_real
+dataset:
+  _target_: diffusion_policy.dataset.victor_low_dim_image_dataset.VictorLowdimImageDataset
+  zarr_path: ${oc.env:CONDA_PREFIX}/../../data/victor/victor_multimodal_data.zarr
+  horizon: 16
+  pad_before: 1
+  pad_after: 7
+  seed: 42
+  val_ratio: 0.1
+  max_train_episodes: null
+  # Define the data keys for multi-modal training
+  act_keys: ['robot_act']
+  obs_keys: 
+    - 'right_joint_positions'    # Joint angles (7 dims)
+    - 'gripper_states'           # Gripper states (4 dims)  
+    - 'wrench_data'              # Force/torque data (6 dims)
+  image_keys: ['image']          # Camera data
+
+shape_meta:
+  # action
+  action: 
+    shape: [11]  # 7 joint angles + 4 gripper commands
+  # observations
+  obs:
+    right_joint_positions:
+      shape: [7]
+      type: low_dim
+      horizon: ${dataset.horizon}
+    gripper_states:
+      shape: [4] 
+      type: low_dim
+      horizon: ${dataset.horizon}
+    wrench_data:
+      shape: [6]  # 3 force + 3 torque
+      type: low_dim 
+      horizon: ${dataset.horizon}
+    image:
+      shape: [3, 300, 486]  # RGB image dimensions
+      type: rgb
+      horizon: ${dataset.horizon}
+
+env_runner:
+  _target_: diffusion_policy.env_runner.victor_real_runner.VictorRealRunner
+  n_train: 10
+  n_train_vis: 3
+  train_start_seed: 0
+  n_test: 22
+  n_test_vis: 6
+  test_start_seed: 10000
+  max_steps: 400
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  n_latency_steps: ${n_latency_steps}
+  fps: 10
+  crf: 22
+  agent_keypoints: false
+  past_action_visible: ${past_action_visible}
+  abs_action: true
+  render_size: [300, 486]
