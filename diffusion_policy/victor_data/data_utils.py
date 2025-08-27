@@ -212,6 +212,7 @@ warnings.filterwarnings(
 def store_zarr_dict_diff_data_a(path, data_dict, **ds_kwargs):
     with zarr.ZipStore(path=path, mode="a") as zf:
         for k, v in data_dict.items():
+            # print("Storing", k)
             v = np.array(v)
             if v.ndim == 1:
                 zarr.open_array(store=zf, path=k).append(v, axis=0)

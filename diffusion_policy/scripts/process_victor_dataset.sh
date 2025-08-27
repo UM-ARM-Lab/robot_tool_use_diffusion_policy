@@ -1,11 +1,11 @@
 #!/bin/bash
 # configure which files to process
-DATA_IN_DIR="$HOME/datasets/robotool_test"
+DATA_IN_DIR="$HOME/datasets/robotool_hdd"
 DATA_OUT_DIR="$HOME/datasets/robotool_processed"
-LN_OUT_DIR="$DP_PROJECT_ROOT/data/victor"
+LN_OUT_DIR="data/victor"
 
-DS_LABEL="08_23_full111"
-PROCESSED_PATH="$DATA_OUT_DIR/victor_data_${DS_LABEL}.zarr.zip"
+DS_LABEL="08_27_cap_106_full"
+PROCESSED_PATH="$DATA_OUT_DIR/victor_${DS_LABEL}"
 
 # Processing configuration
 SIDE="right"
