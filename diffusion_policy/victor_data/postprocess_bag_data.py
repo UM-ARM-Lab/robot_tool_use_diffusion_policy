@@ -19,8 +19,15 @@ Outputs:
   - Episode metadata and timestamps
 """
 
+
+from dataclasses import dataclass, fields
+from typing import Optional, Union
 import argparse
+import re
 import os
+
+import zarr
+import h5py
 
 from rclpy.time import Time
 from tf2_ros.buffer import Buffer
@@ -28,6 +35,8 @@ import tf2_py as tf2
 
 import numpy as np
 import tqdm
+import json
+import yaml
 
 # TODO NOTE: every time you want to run this script, make sure to 
 #               source ros/install/setup.bash
@@ -36,59 +45,48 @@ import tqdm
 
 from diffusion_policy.victor_data.ros_utils import *
 from diffusion_policy.victor_data.data_utils import (
-    read_h5_dict_recursive,
     read_zarr_dict_recursive,
     store_h5_dict,
     store_h5_dict_a,
-    get_h5_topics,
-    get_h5_leaf_topics,
     SmartDict,
-    store_zarr_dict,
     store_zarr_dict_diff_data,
     store_zarr_dict_diff_data_a
 )
 
-import zarr
-import h5py
+from diffusion_policy.victor_data.bag_process_config import BagProcessorConfig
 
 class BagPostProcessor():
     def __init__(self,
-        data_dir,
-        side,
-        vis,
-        aux,
-        inter,
-        hz = 10,
-        train_split=0.85,
-        wrench_hist_window = 30,
-        pc_sample_size = 4096,
-        pc_sample_box=[[-0.4, -0.03],[-0.3, 0.05],[0.6, 1.1]]
+        config: BagProcessorConfig
     ):
-        self.wrench_hist_window = int(wrench_hist_window)    # number of wrench messages per window
-        self.freq = 1/hz # NOTE: timestamps are in ns   # TODO no longer needed due to the zivid times
+        self.config = config
+        print("Initializing BagPostProcessor with config:", config)
+        self.wrench_hist_window = int(config.wrench_hist_window)    # number of wrench messages per window
+        self.freq = 1/config.no_img_hz # NOTE: timestamps are in ns   # TODO no longer needed due to the zivid times
 
-        self.use_vision = vis # should the processed ds include images or not
-        self.use_aux_learn = aux
-        self.use_interpolation = inter
-        self.tracked_sides = [side]
+        self.use_vision = config.use_vision # should the processed ds include images or not
+        self.use_aux_learn = config.use_aux
+        self.use_interpolation = config.use_interpolation
+        self.tracked_sides = [config.side]
 
         # dataset storage
-        self.data_dir = data_dir
+        self.data_dir = config.data_in_dir
         self.proc_dataset = SmartDict(backend="numpy")  # processed dataset
-        self.train_split = train_split
+        self.train_split = config.train_split
+        self.recalibrate_pc = config.recalibrate_pc
         self.last_train_ep_end = 0
         self.last_val_ep_end = 0
 
-        # Sample train/val trajectories
-        self.num_trajectories = len(os.listdir(self.data_dir))
-        self.train_epi = np.random.choice(self.num_trajectories, size=int(self.num_trajectories*0.9), replace=False)
-        self.val_epi = np.setdiff1d(np.arange(self.num_trajectories), self.train_epi)
-        # Cache the minimum blocks
-        self.train_epi0 = self.train_epi.min()
-        self.val_epi0 = self.val_epi.min()
-        print(f"Train with {len(self.train_epi)} and test with {len(self.val_epi)} episodes")
+        # Filter trajectories
+        self.ep_dirs = self._filter_trajectory_by_name()
+        self.num_traj = len(self.ep_dirs)
+        self._train_test_split()
+
+        # Setup pbar
+        self.pbar = tqdm.tqdm(self.ep_dirs, desc="Processing episodes")
         
         # Setup files
+        processed_path = config.processed_path
         self.train_zarr_fn = processed_path + "_train.zarr.zip"
         self.train_h5_fn = processed_path + "/training/ds.h5"
         self.val_zarr_fn = processed_path + "_val.zarr.zip"
@@ -97,33 +95,89 @@ class BagPostProcessor():
         os.makedirs(processed_path + "/training", exist_ok=True)
         os.makedirs(processed_path + "/validation", exist_ok=True)
 
+        self._setup_pc_processing()
+
+    def _filter_trajectory_by_name(self):
+        # Filter out trajectories
+        # Check for empty source
+        all_ep_dirs = sorted(os.listdir(self.data_dir))  # Sort for consistent display
+        num_raw_epi = len(all_ep_dirs)
+        if num_raw_epi < 2:
+            raise ValueError("Error: Not enough raw episodes found in data_in_dir, found:", num_raw_epi)
+        
+        # Display episode filtering in compact block format
+        symbols_per_line = 20  # Number of symbols per line
+        
+        if self.config.trajectory_filter_regex is None:
+            return all_ep_dirs
+
+        ep_dirs = []
+        matched_symbols = []
+        print(f"Episode filtering with regex: {self.config.trajectory_filter_regex}")
+        
+        for ep_dir in all_ep_dirs:
+            if not re.match(self.config.trajectory_filter_regex, ep_dir):
+                matched_symbols.append("✗")
+            else:
+                matched_symbols.append("✓")
+                ep_dirs.append(ep_dir)
+        
+        # Display symbols in blocks
+        for i in range(0, len(matched_symbols), symbols_per_line):
+            chunk_symbols = matched_symbols[i:i + symbols_per_line]
+            symbols_line = f"{i} "
+            symbols_line += "".join(chunk_symbols)
+            print(f"  {symbols_line}")
+
+        matched_count = len(ep_dirs)
+        filtered_count = num_raw_epi - matched_count
+        print(f"  {matched_count} matched (✓), {filtered_count} filtered out (✗)")
+        return ep_dirs
+    
+    def _train_test_split(self):
+        # Sample train/val trajectories
+        self.train_epi = np.random.choice(
+            self.num_traj, size=int(self.num_traj*self.train_split), replace=False
+        )
+        print(f"Selected {len(self.train_epi)} training episodes out of {self.num_traj}")
+        self.val_epi = np.setdiff1d(np.arange(self.num_traj), self.train_epi)
+        if self.train_epi.shape[0] < 1:
+            self.train_epi = np.array([0])
+        if self.val_epi.shape[0] < 1:
+            self.val_epi = np.array([0])
+        # Cache the minimum blocks
+        self.train_epi0 = self.train_epi.min()
+        self.val_epi0 = self.val_epi.min()
+        print(f"Train with {len(self.train_epi)} and test with {len(self.val_epi)} episodes")
+
+    def _setup_pc_processing(self):
         # Setup point cloud processing
-        self.pc_sample_size = pc_sample_size
-        assert len(pc_sample_box) == 3
-        for dim in pc_sample_box:
+        self.pc_sample_size = self.config.pc_sample_size
+        assert len(self.config.pc_sample_box) == 3
+        for dim in self.config.pc_sample_box:
             assert len(dim) == 2
-        self.pc_sample_box = pc_sample_box
+        self.pc_sample_box = self.config.pc_sample_box
 
     def post_process(self):
-        pbar = tqdm.tqdm(os.listdir(self.data_dir), desc="Processing episodes")
-    
-        for ep_i, ep_dir in enumerate(pbar):
+        """Main post process function"""
+        for ep_i, ep_dir in enumerate(self.pbar):
+            print(f"Processing {ep_i+1}/{self.num_traj}: {os.path.basename(ep_dir)}")
             self.proc_dataset = SmartDict(backend="numpy")
             try:
                 self.post_process_ep(self.data_dir, ep_dir, ep_i)
             except Exception as e:
-                import traceback
+                # import traceback
                 print(f"Error processing {ep_dir}: {e}")
-                print("Full traceback:")
-                traceback.print_exc()
+                # print("Full traceback:")
+                # traceback.print_exc()
                 continue
 
         # Finally, copy the validation set as the debug set for h5
-        debug_h5_fn = processed_path + "/debug/ds.h5"
-        os.makedirs(processed_path + "/debug", exist_ok=True)
+        debug_h5_fn = self.config.processed_path + "/debug/ds.h5"
+        os.makedirs(self.config.processed_path + "/debug", exist_ok=True)
         os.system(f"cp {self.val_h5_fn} {debug_h5_fn}")
 
-        print("saving processed dataset dict to", self.train_zarr_fn)
+        print(f"saving processed trajectories to", self.train_zarr_fn)
 
     def post_process_ep(self, data_dir, ep_name, ep_i):
         # Setup
@@ -138,14 +192,28 @@ class BagPostProcessor():
         self.raw_dataset = SmartDict(backend="numpy")
         read_zarr_dict_recursive(zf, self.raw_dataset)
 
-        # Prepare for prcessing
+        # Setup annotation file
+        annot_file = os.path.join(data_dir, ep_name, "annotation.json")
+        try:
+            with open(annot_file, "r") as f:
+                self.annotation = json.load(f)
+        except Exception as e:
+            # print(f"Error loading annotation file {annot_file}: {e}")
+            self.annotation = None
+
+        # Prepare for processing
         self._setup_topics(zf)
         self._setup_timestamps()
+        # Setup display
+        new_start = self.timestamps[0] // 1e9
+        new_end = self.timestamps[-1] // 1e9
+        self.pbar.set_description(f"Epi {ep_i+1} | {new_start}-{new_end}s")
 
         # Actual processing
         self._register_transform_buffer()
         self._interpolate_tf()
         self._add_other_values()
+
         self._add_vision()
         self._add_finger_specifics()
         self._add_wrench()
@@ -157,7 +225,7 @@ class BagPostProcessor():
         zarr_fname = self.train_zarr_fn if ep_i in self.train_epi else self.val_zarr_fn
         h5_fname = self.train_h5_fn if ep_i in self.train_epi else self.val_h5_fn
 
-        print(self.train_epi0, ep_i)
+        # print(self.train_epi0, ep_i)
         if ep_i == self.train_epi0 or ep_i == self.val_epi0:   # TODO ugly :(
             store_zarr_dict_diff_data(zarr_fname, self.proc_dataset)
             store_h5_dict(h5_fname, self.proc_dataset)
@@ -169,7 +237,6 @@ class BagPostProcessor():
         """
         Setup which topics to track
         """
-        # self.tracked_sides = ["left", "right"]
         self.parent_topics = [  # mostly used for finding the corresponding timestamp for these topics
             "gripper_status",
             "motion_status",
@@ -236,20 +303,71 @@ class BagPostProcessor():
     def _setup_timestamps(self):
         ### SETUP timestamps
         evt = self.__find_earliest_valid_time()
-        # self.timestamps = list(range(evt, int(self.raw_dataset["/duration"][0]), int(self.freq * 1e9)))
-
         if self.use_vision:
             evt_zivid = np.searchsorted(self.raw_dataset["/zivid/timestamp"], evt)
             self.timestamps = self.raw_dataset["/zivid/timestamp"][evt_zivid:]
-            # TODO WRONG
-            # self.wrench_timestamps = self.raw_dataset["/wrench/timestamp"][evt_zivid:]
         else:
             self.timestamps = list(range(evt, int(self.raw_dataset["/duration"][0]), int(self.freq * 1e9)))
-
+        
+        print(f"Raw timestamps, from {self.timestamps[0]//1e9} to {self.timestamps[-1]//1e9}s, total {len(self.timestamps)}")
+        self._filter_timestamps_for_chunk()
         self._filter_timestamps_for_plateau()
         # Add filtered timestamp to dataset
         for ts in self.timestamps:
             self.proc_dataset.add("data/timestamp", ts)
+
+    def _get_annotation_keyframe_time(self, annotation, target_keyframe, type='start') -> int:
+        # Check annotation
+        if annotation is None:
+            raise ValueError("Annotation file is required for chunking but not found.")
+        custom_keyframes = annotation["keyframes"]
+        assert isinstance(custom_keyframes, dict), "Keyframes must be a dictionary."
+
+        if type == 'start':
+            if target_keyframe.startswith('<start>'):
+                return self._zivid_start_ts
+            if self.config.chunking_start_label not in custom_keyframes.keys():
+                raise ValueError("Chunking start label not found in keyframes.")
+        elif type == 'end':
+            if target_keyframe.startswith('<end>'):
+                return self._zivid_end_ts
+            if self.config.chunking_end_label not in custom_keyframes.keys():
+                raise ValueError("Chunking end label not found in keyframes.")
+
+        target_ts = int(custom_keyframes[target_keyframe]) * 1e9  # seconds
+        assert target_ts <= self._zivid_end_ts, "Target timestamp exceeds Zivid end timestamp."
+        return int(target_ts)
+
+    def _filter_timestamps_for_chunk(self):
+        """
+        Filter timestamps for each chunk of data.
+        """
+        if not self.use_vision:
+            print("Chunking only supported with vision data, skipping chunking.")
+            return
+        
+        if len(self.timestamps) <= 1:
+            return
+        
+        # Setup zivid timestamps
+        zivid_timestamps = self.raw_dataset["/zivid/timestamp"]     # sec * 1e9 (ns in int)
+        self._zivid_start_ts = int(zivid_timestamps[0])
+        self._zivid_end_ts = int(zivid_timestamps[-1])
+        
+        # If full, just return
+        if self.config.chunking_end_label == '<end>' \
+            and self.config.chunking_start_label == '<start>':
+            return
+
+        start_time = self._get_annotation_keyframe_time(
+            self.annotation, self.config.chunking_start_label, type='start'
+        )
+        end_time = self._get_annotation_keyframe_time(
+            self.annotation, self.config.chunking_end_label, type='end'
+        )
+        # Filter timestamps
+        self.timestamps = [ts for ts in self.timestamps if start_time <= int(ts) <= end_time]
+        # print(f"Chunking timestamps to {len(self.timestamps)} between {start_time//1e9}-{end_time//1e9}s")
 
     def _filter_timestamps_for_plateau(self):
         """
@@ -320,9 +438,9 @@ class BagPostProcessor():
                 mask[i] = False
         
         # Update timestamps to keep only non-plateau points
-        original_count = len(self.timestamps)
+        # original_count = len(self.timestamps)
         self.timestamps = [self.timestamps[i] for i in range(len(self.timestamps)) if mask[i]]
-        filtered_count = len(self.timestamps)
+        # filtered_count = len(self.timestamps)
         # print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
 
     # returns the topics we want to track in the final dataset
@@ -330,15 +448,6 @@ class BagPostProcessor():
         return [
             "target_victor_" + side + "_tool0",
             "victor_" + side + "_tool0",
-        
-            # "victor_" + side + "_arm_link_0",
-            # "victor_" + side + "_arm_link_1",
-            # "victor_" + side + "_arm_link_2",
-            # "victor_" + side + "_arm_link_3",
-            # "victor_" + side + "_arm_link_4",
-            # "victor_" + side + "_arm_link_5",
-            # "victor_" + side + "_arm_link_6",
-            # "victor_" + side + "_arm_link_7",
         ]
 
     # add a tf topic to the tf buffer
@@ -416,6 +525,14 @@ class BagPostProcessor():
                     # ALTERNATIVELY do the latest data from the dict
                     # self.proc_dataset.add("pose/" + topic + "/translation", self.proc_dataset["pose/" + topic  + "/translation"][-1])
                     # self.proc_dataset.add("pose/" + topic + "/rotation", self.proc_dataset["pose/" + topic  + "/rotation"][-1])
+
+        # Deal specifically zivid optical frame
+
+    def _get_static_transform(self, tf_t):
+        tr = bag_proc.buffer.lookup_transform("victor_root", tf_t, Time(nanoseconds=self.timestamps[0]))
+        translation = ros_msg_to_arr(tr.transform.translation)
+        rotation = ros_msg_to_arr(tr.transform.rotation)
+        return translation, rotation
 
     def _compute_bounds(self, ts_arr: np.ndarray, targets: np.ndarray):
         """
@@ -538,12 +655,17 @@ class BagPostProcessor():
             for s_key, out in rtn_dict.items():
                 self.proc_dataset[s_key] = out
 
-    def _filter_pc(self, pc):
+    def _process_pc(self, pc):
         """
         Filter point cloud to only include points within the specified box.
         pc: (3, N) numpy array
         pc_sample_box: [[x_min, y_min], [x_max, y_max], [z_min, z_max]]
         """
+
+        if self.recalibrate_pc:
+            pc[:3] = self.config.recalibrate_matrix[:3,:3] @ pc[:3] + self.config.recalibrate_matrix[:3,3:4]
+
+        # Filter
         x_min, x_max = self.pc_sample_box[0]
         y_min, y_max = self.pc_sample_box[1]
         z_min, z_max = self.pc_sample_box[2]
@@ -554,7 +676,31 @@ class BagPostProcessor():
             (pc[2] >= z_min) & (pc[2] <= z_max)
         )
         pc_boxed = pc[:, mask]
-        # print("Filtered point cloud shape:", pc_filtered.shape)
+
+        # Then, get transform and transform PC
+        if self.config.zivid_calib_from_tf:
+            # EITHER, use existing transform in the dataset
+            zivid_translation, zivid_rotation = self._get_static_transform("zivid_optical_frame")
+
+            # Build rotation matrix
+            from scipy.spatial.transform import Rotation
+            rot = Rotation.from_quat(zivid_rotation)
+            rot_mat = rot.as_matrix()
+            # Build homogeneous matrix
+            homo_matrix = np.eye(4)
+            homo_matrix[:3, :3] = rot_mat
+            homo_matrix[:3, 3] = zivid_translation
+        else:
+            homo_matrix = self.config.hardcode_zivid_calib_matrix
+
+        # Transform points
+        homo_ones = np.ones((1,)+pc_boxed.shape[1:], dtype=pc_boxed.dtype)
+        pc_xyz_homo = np.vstack([pc_boxed[:3], homo_ones])      # 4xN
+        # print("PC HOMO sample:", pc_xyz_homo[...,:3].T)
+        pc_xyz_transformed = homo_matrix @ pc_xyz_homo       # 4xN
+        pc_xyz = pc_xyz_transformed[:3]     # 3xN
+        pc_boxed[:3] = pc_xyz
+        
         sampled_idx = np.random.choice(pc_boxed.shape[1], self.pc_sample_size, replace=True)
         return pc_boxed[:, sampled_idx].T        # (N, 6)
 
@@ -575,7 +721,7 @@ class BagPostProcessor():
                 img_h5 = h5py.File(os.path.join(self.img_dir, "processed_chunk_" + str(chunk_id) + ".h5"))
             try:
                 self.proc_dataset.add("data/image", img_h5["rgb"][offset_id])
-                pc = self._filter_pc(img_h5["pc"][offset_id])
+                pc = self._process_pc(img_h5["pc"][offset_id])
                 if pc.shape[0] <= 0:
                     raise Exception("No points in point cloud after filtering")
                 self.proc_dataset.add("data/pc_xyz", pc[:,:3])
@@ -583,7 +729,7 @@ class BagPostProcessor():
             except IndexError:
                 print("index", offset_id,"in chunk", chunk_id, "is out of bounds, using last image")
                 self.proc_dataset.add("data/image", img_h5["rgb"][-1])
-                pc = self._filter_pc(img_h5["pc"][-1])
+                pc = self._process_pc(img_h5["pc"][-1])
                 if pc.shape[0] <= 0:
                     raise Exception("No points in point cloud after filtering")
                 self.proc_dataset.add("data/pc_xyz", pc[:,:3])
@@ -665,7 +811,7 @@ class BagPostProcessor():
 
             # If your downstream expects a list of (N, D) arrays per timestep:
             self.proc_dataset[s_key] = [w.T for w in wrench_windows]
-            
+    
     def _add_progress(self):
         """Auxiliary learning progress prediction"""
         if not self.use_aux_learn:
@@ -708,16 +854,32 @@ class BagPostProcessor():
         prev_robot_act    = np.roll(robot_act,    shift=1, axis=0)        # (N, 8)
         prev_robot_act_ee = np.roll(robot_act_ee, shift=1, axis=0)        # (N, 8)
 
+        diff_robot_act = robot_act - prev_robot_act
+        prev_diff_robot_act = np.roll(diff_robot_act, shift=1, axis=0)
+        diff_robot_act_ee = robot_act_ee - prev_robot_act_ee
+        prev_diff_robot_act_ee = np.roll(diff_robot_act_ee, shift=1, axis=0)
+
         # --- Observations (current measurements + previous action) ---
         robot_obs    = np.hstack([prev_robot_act,    q_meas, g_meas])     # (N, 8+7+4=19)
+        diff_robot_obs = np.hstack([prev_diff_robot_act,    q_meas, g_meas]) # (N, 8+7+4=19)
         robot_obs_ee = np.hstack([prev_robot_act_ee, ee_cur_t, ee_cur_r, g_meas])  # (N, 8+3+4+4=19)
+        diff_robot_obs_ee = np.hstack([prev_diff_robot_act_ee, ee_cur_t, ee_cur_r, g_meas])  # (N, 8+3+4+4=19)
 
         # Even though compute is parallelized, adding is still sequential to maintain shapes
         for i, ts in enumerate(self.timestamps):
+            # joint space act
             self.proc_dataset.add("data/robot_act", robot_act[i])
+            self.proc_dataset.add("data/robot_act_diff", diff_robot_act[i])
+            # ee space act
             self.proc_dataset.add("data/robot_act_ee", robot_act_ee[i])
+            self.proc_dataset.add("data/robot_act_diff", diff_robot_act[i])
+
+            # joint space obs
             self.proc_dataset.add("data/robot_obs", robot_obs[i])
+            self.proc_dataset.add("data/robot_obs_diff", diff_robot_obs[i])
+            # ee space obs
             self.proc_dataset.add("data/robot_obs_ee", robot_obs_ee[i])
+            self.proc_dataset.add("data/robot_obs_ee_diff", diff_robot_obs_ee[i])
 
     def _add_episode_ends(self, ep):
         """As titled"""
@@ -735,36 +897,19 @@ class BagPostProcessor():
         #     self.proc_dataset["data/robot_act_ee"][..., -1] = self.proc_dataset["data/robot_act_ee"][..., -1] / i
 
 if __name__ == "__main__":
-    # print("postprocessing ......")
-
     parser = argparse.ArgumentParser(description = "A post-processor script to take the raw dataset and create a processed dataset for training a Diffusion Policy model")
-    parser.add_argument("-d", "--data", metavar="PATH_TO_DATA_IN_DIR",help = "path to the raw dataset directory",
-                        required=True)
-    parser.add_argument("-p", "--processed", metavar="PATH_TO_PROCESSED_FILE", help = "path to save the processed file at",
-                         required=True)
-    parser.add_argument("-s", "--side", help = "which should the dataset include", choices=["left", "right"],
-                         required=True)
-    parser.add_argument("-v", "--vision", help = "should the dataset use images", choices=["true", "false"],
-                         required = False, default = "true")
-    parser.add_argument("-a", "--aux", help = "should the model learn auxilary tasks", choices=["true", "false"],
-                         required = False, default = "true")    
-    parser.add_argument("-i", "--interpolation", help = "should the dataset contain interpolated values", choices=["true", "false"],
-                         required = False, default = "true")
+    parser.add_argument("-c", "--config", help = "path to the config file", required = True)
     argument = parser.parse_args()
 
-    data_in_dir = argument.data
-    processed_path = argument.processed
+    proc_config = BagProcessorConfig()
 
-    side = argument.side    # defaults to right
-    vision = argument.vision
-    aux = argument.aux
-    inter = argument.interpolation
-
+    config_path = argument.config
+    if not os.path.exists(config_path) or not config_path.endswith(".yaml"):
+        raise ValueError("Invalid config file: {}".format(config_path))
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    proc_config = proc_config.update(config)
     bag_proc = BagPostProcessor(
-        data_in_dir,
-        side,
-        vision == 'true',
-        aux == 'true',
-        inter == 'true'
+        config=proc_config
     )
     bag_proc.post_process()

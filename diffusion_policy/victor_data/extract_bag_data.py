@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 import os
 import json
+import yaml
 
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
@@ -16,8 +17,7 @@ from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 from rclpy.time import Time
 import numpy as np
 
-from std_msgs.msg import String, Float64MultiArray
-from geometry_msgs.msg import WrenchStamped
+from std_msgs.msg import String
 # TODO NOTE: every time you want to run this script, make sure to 
 #               source ros/install/setup.bash
 #            (after building victor_hardware_interfaces of course)
@@ -26,6 +26,7 @@ from geometry_msgs.msg import WrenchStamped
 from diffusion_policy.victor_data.ros_utils import *
 from diffusion_policy.victor_data.data_utils import store_h5_dict, SmartDict, store_zarr_dict
 
+from diffusion_policy.victor_data.bag_process_config import BagProcessorConfig
 
 def guess_msgtype(path: Path) -> str:
     """Guess message type name from path."""
@@ -35,8 +36,7 @@ def guess_msgtype(path: Path) -> str:
     return str(name)
 
 class BagProcessor():
-    def __init__(self, m_d, s):
-        self.split = s == "true"
+    def __init__(self, m_d):
         self.msg_dir = Path(m_d)
         self.msg_file_names = os.listdir(self.msg_dir)    # assumes only .msg files in dir
         
@@ -93,11 +93,7 @@ class BagProcessor():
         self.reset()    # prepare for the new bag
         bag_dir = os.path.join(ep_dir, "rosbag")
         save_dir = os.path.join(ep_dir, "raw")
-        annotation_path = os.path.join(ep_dir, "annotation.json")
         split_second = None
-        # split
-        if self.split:
-            split_second = json.load(open(annotation_path, "r"))["keyframes"]['align_cap']
 
         with Reader(bag_dir) as reader:
             #initial time is the time the first mesage was received
@@ -235,27 +231,53 @@ class BagProcessor():
                 self.dataset.add("reference_pose/" + t.child_frame_id + "/timestamp", self.elapsed_ns(ti))
 
 if __name__ == "__main__":
-    # print("un-baggin' it")
 
     parser = argparse.ArgumentParser(description = "A post-processor script to take the raw dataset and create a processed dataset for training a Diffusion Policy model")
-    parser.add_argument("-d", "--data", metavar="PATH_TO_DATA_IN_DIR" ,help = "path to the data in directory",
-                        required = False, default = "data_in")   #rosbag/rosbag2_2025_06_05-12_29_01
+    parser.add_argument("-c", "--config", metavar="Config file for processing", help = "path to the config file",
+                        required=True)   #rosbag/rosbag2_2025_06_05-12_29_01
     parser.add_argument("-m", "--msg", metavar="PATH_TO_MSG", help = "path to the victor_hardware_interfaces .msg files",
                          required = False, default=f"{os.path.dirname(__file__)}/victor_hardware_interfaces/msg/")
-    parser.add_argument('-s', '--split', help = "should the dataset be split before a keyframe", choices=["true", "false"],
-                         required = False, default = "true")
+    parser.add_argument("--version_only", action="store_true", help="only update the version hash, do not reprocess")
     argument = parser.parse_args()
 
-    # required args
-    data_dir = argument.data
-    # raw_dir = argument.raw
-    to_split = argument.split
+    config_path = argument.config
+    if not os.path.exists(config_path) or not config_path.endswith(".yaml"):
+        raise ValueError("Invalid config file: {}".format(config_path))
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    proc_config = BagProcessorConfig()
+    proc_config.update(config)
+
+    data_dir = proc_config.data_in_dir
     
     # optional args
     msg_path = argument.msg    # defaults to ros/victor_hardware_i1terfaces/msg/
-    bag_proc = BagProcessor(msg_path, to_split)
+    bag_proc = BagProcessor(msg_path)
+
+    # Hash self so we do not need to reprocess if the script is unchanged
+    self_script_path = os.path.abspath(__file__)
+    self_script_hash = hash(open(self_script_path, 'rb').read())
+    self_version_config = {
+        "script_hash": self_script_hash
+    }
 
     for ep_name in os.listdir(data_dir):
-        print("Beginning", ep_name)
-        bag_proc.process(os.path.join(data_dir, ep_name), ep_name)
+        # Check if hash exists
+        ext_version_path = os.path.join(data_dir, ep_name, "raw", "version.json")
+        # if version exists and matches, skip
+        if os.path.exists(ext_version_path):
+            version_config = json.load(open(ext_version_path, "r"))
+            if version_config == self_version_config:
+                print(f"Skipping {ep_name}, already processed")
+                continue
+        elif argument.version_only and os.path.exists(ext_version_path):
+            print(f"Updating version hash for {ep_name}")
+            json.dump(self_version_config, open(ext_version_path, "w"))
+            continue
+        else:
+            print(f"Processing {ep_name}")
+        # Process and save the hash
+        json.dump(self_version_config, open(ext_version_path, "w"))
+        # bag_proc.process(os.path.join(data_dir, ep_name), ep_name)
 

@@ -231,14 +231,6 @@ class InteractiveDatasetVisualizer:
         title = f'Frame {self.current_frame}/{self.num_frames-1} | {len(xyz)} points\n{episode_str} | {timestamp_str}'
         self.ax.set_title(title)
         
-        # Set hard-coded axis ranges
-        self.ax.set_xlim(-0.3, -0.05)
-        self.ax.set_ylim(-0.2, 0.1)
-        try:
-            self.ax.set_zlim(0.6, 0.9)
-        except AttributeError:
-            pass  # Some matplotlib versions don't have set_zlim
-        
         # Draw the canvas
         self.fig.canvas.draw()
         
