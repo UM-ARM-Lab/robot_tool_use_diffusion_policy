@@ -38,6 +38,13 @@ import tqdm
 import json
 import yaml
 
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 # TODO NOTE: every time you want to run this script, make sure to 
 #               source ros/install/setup.bash
 #            (after building victor_hardware_interfaces of course)
@@ -91,9 +98,11 @@ class BagPostProcessor():
         self.train_h5_fn = processed_path + "/training/ds.h5"
         self.val_zarr_fn = processed_path + "_val.zarr.zip"
         self.val_h5_fn = processed_path + "/validation/ds.h5"
+        self.video_dir = processed_path + "/videos"
 
         os.makedirs(processed_path + "/training", exist_ok=True)
         os.makedirs(processed_path + "/validation", exist_ok=True)
+        os.makedirs(self.video_dir, exist_ok=True)
 
         self._setup_pc_processing()
 
@@ -181,6 +190,7 @@ class BagPostProcessor():
 
     def post_process_ep(self, data_dir, ep_name, ep_i):
         # Setup
+        self.current_ep_name = ep_name  # Store episode name for use in other methods
         self.zarr_dir = os.path.join(data_dir, ep_name, "raw", ep_name + ".zarr.zip")
         self.img_dir = os.path.join(data_dir, ep_name, "zivid")
 
@@ -204,6 +214,7 @@ class BagPostProcessor():
         # Prepare for processing
         self._setup_topics(zf)
         self._setup_timestamps()
+
         # Setup display
         new_start = self.timestamps[0] // 1e9
         new_end = self.timestamps[-1] // 1e9
@@ -220,6 +231,8 @@ class BagPostProcessor():
         self._add_progress()
         self._add_extra_fields()
         self._add_episode_ends(ep_i)
+
+        self._export_videos()
         
         # Then save
         zarr_fname = self.train_zarr_fn if ep_i in self.train_epi else self.val_zarr_fn
@@ -438,10 +451,10 @@ class BagPostProcessor():
                 mask[i] = False
         
         # Update timestamps to keep only non-plateau points
-        # original_count = len(self.timestamps)
+        original_count = len(self.timestamps)
         self.timestamps = [self.timestamps[i] for i in range(len(self.timestamps)) if mask[i]]
-        # filtered_count = len(self.timestamps)
-        # print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
+        filtered_count = len(self.timestamps)
+        print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
 
     # returns the topics we want to track in the final dataset
     def __get_tf_topics(self, side: str):
@@ -553,7 +566,6 @@ class BagPostProcessor():
         high_clip = np.clip(high_raw, 0, n - 1)
         return low_clip, high_clip, mask_left, mask_right
 
-
     def _sample_series(self, 
         ts_arr: np.ndarray,
         y: np.ndarray,
@@ -561,7 +573,10 @@ class BagPostProcessor():
         *,
         mode: str = "linear",
         left_policy: str = "first",   # or "nan"
-        right_policy: str = "last"    # or "nan"
+        right_policy: str = "last",    # or "nan"
+        validate_timestamps: bool = False,
+        timestamp_tolerance: float = 0.1,  # seconds
+        warn_on_mismatch: bool = True
     ) -> np.ndarray:
         """
         Vectorized sampling of a time series y(ts_arr) at arbitrary targets.
@@ -710,15 +725,17 @@ class BagPostProcessor():
         """
         if not self.use_vision:
             return
-        
+
+        last_chunk_id = -1
         img_h5 = None
         for ts in self.timestamps:
-            img_i = np.searchsorted(self.raw_dataset["/zivid/timestamp"], ts) 
+            img_i = np.where(self.raw_dataset["/zivid/timestamp"] == ts)[0][0]
             fid = self.raw_dataset["/zivid/frame_id"][img_i]
             chunk_id = fid // 50
             offset_id = fid % 50
-            if img_h5 is None or offset_id == 0:   # we've finished one chunk -> load next
+            if img_h5 is None or last_chunk_id != chunk_id:   # we've finished one chunk -> load next
                 img_h5 = h5py.File(os.path.join(self.img_dir, "processed_chunk_" + str(chunk_id) + ".h5"))
+                last_chunk_id = chunk_id
             try:
                 self.proc_dataset.add("data/image", img_h5["rgb"][offset_id])
                 pc = self._process_pc(img_h5["pc"][offset_id])
@@ -896,9 +913,89 @@ class BagPostProcessor():
         #     self.proc_dataset["data/robot_act"][..., -1] = self.proc_dataset["data/robot_act"][..., -1] / i
         #     self.proc_dataset["data/robot_act_ee"][..., -1] = self.proc_dataset["data/robot_act_ee"][..., -1] / i
 
+    def _export_videos(self):
+        """
+        Export a video of the RGB images in the processed dataset for visualization.
+        """
+        # Check if cv2 is available
+        if not CV2_AVAILABLE:
+            print(f"OpenCV (cv2) not available, skipping video export for episode {self.current_ep_name}")
+            return
+            
+        # Skip video export if vision is not used or no images are available
+        if not self.use_vision or "data/image" not in self.proc_dataset:
+            return
+            
+        images = self.proc_dataset["data/image"]
+        if len(images) == 0:
+            print(f"No images found for episode {self.current_ep_name}, skipping video export")
+            return
+            
+        # Create video filename with "_filtered" suffix
+        video_filename = f"{self.current_ep_name}_filtered.mp4"
+        video_path = os.path.join(self.video_dir, video_filename)
+        
+        try:
+            # Get first image to determine dimensions
+            first_image = np.array(images[0])
+            if first_image.ndim == 3:
+                height, width, channels = first_image.shape
+            else:
+                print(f"Unexpected image shape: {first_image.shape}, skipping video export")
+                return
+                
+            # Define the codec and create VideoWriter object
+            # Use mp4v codec for better compatibility
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fps = 10  # 10 Hz as requested
+            out = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+            
+            if not out.isOpened():
+                print(f"Failed to open video writer for {video_path}")
+                return
+                
+            print(f"Exporting video for episode {self.current_ep_name} with {len(images)} frames at {fps} Hz")
+            
+            # Write frames to video
+            for i, img in enumerate(images):
+                frame = np.array(img)
+                
+                # Ensure frame is in the correct format (BGR for OpenCV)
+                if frame.ndim == 3 and frame.shape[2] == 3:
+                    # Convert RGB to BGR if needed (OpenCV uses BGR)
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                else:
+                    frame_bgr = frame
+                    
+                # Ensure frame is uint8
+                if frame_bgr.dtype != np.uint8:
+                    frame_bgr = (frame_bgr * 255).astype(np.uint8) if frame_bgr.max() <= 1.0 else frame_bgr.astype(np.uint8)
+                    
+                out.write(frame_bgr)
+                
+            # Release the video writer
+            out.release()
+            print(f"Video exported successfully: {video_path}")
+            
+        except Exception as e:
+            print(f"Error exporting video for episode {self.current_ep_name}: {e}")
+            # Clean up if there was an error
+            try:
+                if 'out' in locals():
+                    out.release()  # type: ignore
+            except Exception:
+                pass
+            try:
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+            except Exception:
+                pass
+        
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "A post-processor script to take the raw dataset and create a processed dataset for training a Diffusion Policy model")
-    parser.add_argument("-c", "--config", help = "path to the config file", required = True)
+    parser.add_argument("-c", "--config", help = "path to the config file", required = False, default="/home/houhd/datasets/robotool_configs/0903_newcalib_95split_second_half.yaml")
     argument = parser.parse_args()
 
     proc_config = BagProcessorConfig()
