@@ -10,12 +10,15 @@ from pathlib import Path
 import os
 import json
 import yaml
+import hashlib
 
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 
 from rclpy.time import Time
 import numpy as np
+
+from tqdm import tqdm
 
 from std_msgs.msg import String
 # TODO NOTE: every time you want to run this script, make sure to 
@@ -257,27 +260,35 @@ if __name__ == "__main__":
 
     # Hash self so we do not need to reprocess if the script is unchanged
     self_script_path = os.path.abspath(__file__)
-    self_script_hash = hash(open(self_script_path, 'rb').read())
+    with open(self_script_path, 'rb') as f:
+        file_content = f.read()
+    self_script_hash = hashlib.md5(file_content).hexdigest()
     self_version_config = {
         "script_hash": self_script_hash
     }
-
-    for ep_name in os.listdir(data_dir):
+    ep_names = sorted(os.listdir(data_dir))
+    pbar = tqdm(ep_names)
+    for ep_name in pbar:
         # Check if hash exists
+        os.makedirs(os.path.join(data_dir, ep_name, "raw"), exist_ok=True)
         ext_version_path = os.path.join(data_dir, ep_name, "raw", "version.json")
+        
         # if version exists and matches, skip
         if os.path.exists(ext_version_path):
             version_config = json.load(open(ext_version_path, "r"))
-            if version_config == self_version_config:
-                print(f"Skipping {ep_name}, already processed")
+            other_hash = version_config["script_hash"]
+            self_hash = self_version_config["script_hash"]
+            if other_hash == self_hash:
+                pbar.set_description("Skipping")
                 continue
-        elif argument.version_only and os.path.exists(ext_version_path):
-            print(f"Updating version hash for {ep_name}")
+
+        if argument.version_only and os.path.exists(ext_version_path):
+            pbar.set_description("Updating hash")
             json.dump(self_version_config, open(ext_version_path, "w"))
             continue
         else:
-            print(f"Processing {ep_name}")
+            pbar.set_description(f"Processing {ep_name}")
         # Process and save the hash
         json.dump(self_version_config, open(ext_version_path, "w"))
-        # bag_proc.process(os.path.join(data_dir, ep_name), ep_name)
+        bag_proc.process(os.path.join(data_dir, ep_name), ep_name)
 

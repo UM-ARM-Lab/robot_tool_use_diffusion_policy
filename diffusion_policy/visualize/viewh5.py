@@ -48,6 +48,19 @@ def print_h5_tree(file_path, max_items=10, max_depth=None):
                 except Exception as e:
                     print(f"{indent}  Error reading values: {e}")
 
+            elif name == 'episode_name':
+                try:
+                    values = obj[:]
+                    # Handle string/object datasets
+                    if obj.dtype.kind in ['U', 'S', 'O']:  # Unicode, byte string, or object
+                        if obj.dtype.kind == 'S':  # byte strings
+                            values = [v.decode('utf-8') if isinstance(v, bytes) else v for v in values]
+                        elif obj.dtype.kind == 'O':  # object type (often strings)
+                            values = [v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in values]
+                    print(f"{indent}  Values: {values}")
+                except Exception as e:
+                    print(f"{indent}  Error reading values: {e}")
+
             # Show attributes if any
             if obj.attrs:
                 for attr_name, attr_value in obj.attrs.items():

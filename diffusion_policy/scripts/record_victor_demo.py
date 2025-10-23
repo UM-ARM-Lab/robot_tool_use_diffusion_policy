@@ -6,6 +6,8 @@ import subprocess
 import signal
 import datetime
 from pathlib import Path
+import json
+
 def main():
     parser = argparse.ArgumentParser(description="Run Zivid capture and rosbag record in parallel.")
     parser.add_argument("--tag", required=True, help="Tag to append to the dataset folder")
@@ -22,12 +24,24 @@ def main():
     ros_ws_path = os.environ.get("ROS_WS_PATH")
     if not ros_ws_path:
         raise EnvironmentError("Environment variable $ROS_WS_PATH is not set.")
+    
+    annotation_template = {
+        "keyframes": {
+            "open_end": 0,
+            "open_begin": 0,
+            "insert_begin": 0
+        },
+        "correction_timestamps": [0]
+    }
+
+    with open(root_dir / "annotation.json", "w") as f:
+        json.dump(annotation_template, f, indent=4)
 
     zivid_cmd = [
         "python3",
         f"{ros_ws_path}/src/arm_zivid/arm_zivid/arm_zivid_ros_node_local.py",
         "--verbose",
-        "-s", f"{ros_ws_path}/config/zivid2_Settings_Zivid_Two_M70_ParcelsMatte_10Hz_4xsparse_enginetop_boxed.yml",
+        "-s", f"{ros_ws_path}/config/zivid2_11Hz_Engine_2D3D_Final.yml",
         "-n", "zivid",
         "-r", str(root_dir),
         "--output-format", "h5",

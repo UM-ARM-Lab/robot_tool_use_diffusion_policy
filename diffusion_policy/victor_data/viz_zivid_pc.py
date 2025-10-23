@@ -259,28 +259,18 @@ class MatplotlibPointCloudVisualizer:
         title = f'Frame {self.current_frame}/{self.num_frames-1} | {len(xyz)} points{timestamp_str}'
         self.ax.set_title(title)
         
-        # Set equal aspect ratio
-        # max_range = np.array([xyz[:,0].max()-xyz[:,0].min(), 
-        #                      xyz[:,1].max()-xyz[:,1].min(),
-        #                      xyz[:,2].max()-xyz[:,2].min()]).max() / 2.0
-        # mid_x = (xyz[:,0].max()+xyz[:,0].min()) * 0.5
-        # mid_y = (xyz[:,1].max()+xyz[:,1].min()) * 0.5
-        # mid_z = (xyz[:,2].max()+xyz[:,2].min()) * 0.5
-        # self.ax.set_xlim(mid_x - max_range, mid_x + max_range)
-        # self.ax.set_ylim(mid_y - max_range, mid_y + max_range)
-        # # Set Z limits (3D axes support)
-        # try:
-        #     self.ax.set_zlim(mid_z - max_range, mid_z + max_range)
-        # except AttributeError:
-        #     # Fallback for different matplotlib versions
-        #     pass
-
-        # Set hard-coded axis ranges
-        self.ax.set_xlim(-0.3, 0.1)
-        self.ax.set_ylim(-0.2, 0.1)
+        # Set equal aspect ratio based on data bounds
+        max_range = np.array([xyz[:,0].max()-xyz[:,0].min(), 
+                             xyz[:,1].max()-xyz[:,1].min(),
+                             xyz[:,2].max()-xyz[:,2].min()]).max() / 2.0
+        mid_x = (xyz[:,0].max()+xyz[:,0].min()) * 0.5
+        mid_y = (xyz[:,1].max()+xyz[:,1].min()) * 0.5
+        mid_z = (xyz[:,2].max()+xyz[:,2].min()) * 0.5
+        self.ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        self.ax.set_ylim(mid_y - max_range, mid_y + max_range)
         # Set Z limits (3D axes support)
         try:
-            self.ax.set_zlim(0.6, 0.9)
+            self.ax.set_zlim(mid_z - max_range, mid_z + max_range)
         except AttributeError:
             # Fallback for different matplotlib versions
             pass

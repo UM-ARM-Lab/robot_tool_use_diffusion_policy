@@ -170,7 +170,7 @@ class BagPostProcessor():
     def post_process(self):
         """Main post process function"""
         for ep_i, ep_dir in enumerate(self.pbar):
-            print(f"Processing {ep_i+1}/{self.num_traj}: {os.path.basename(ep_dir)}")
+            # print(f"Processing {ep_i+1}/{self.num_traj}: {os.path.basename(ep_dir)}")
             self.proc_dataset = SmartDict(backend="numpy")
             try:
                 self.post_process_ep(self.data_dir, ep_dir, ep_i)
@@ -186,7 +186,7 @@ class BagPostProcessor():
         os.makedirs(self.config.processed_path + "/debug", exist_ok=True)
         os.system(f"cp {self.val_h5_fn} {debug_h5_fn}")
 
-        print(f"saving processed trajectories to", self.train_zarr_fn)
+        print(f"saving dataset to", self.train_zarr_fn)
 
     def post_process_ep(self, data_dir, ep_name, ep_i):
         # Setup
@@ -208,7 +208,7 @@ class BagPostProcessor():
             with open(annot_file, "r") as f:
                 self.annotation = json.load(f)
         except Exception as e:
-            # print(f"Error loading annotation file {annot_file}: {e}")
+            print(f"Error loading annotation file {annot_file}: {e}")
             self.annotation = None
 
         # Prepare for processing
@@ -225,6 +225,63 @@ class BagPostProcessor():
         self._interpolate_tf()
         self._add_other_values()
 
+        # # Filter for plateau after
+        # self._filter_timestamps_for_plateau()
+
+        # # Debug
+        # jc_np = np.array(self.proc_dataset["data/joint_angles_data"])
+        # d_cmd = np.diff(jc_np, axis=0)
+        # d_cmd_mag = np.linalg.norm(d_cmd, axis=-1)
+        # d_cmd_zero = (d_cmd == 0).all(axis=-1)
+        # # print(f"Cmd has stopped for {np.sum(d_cmd_zero)} timestamps")
+
+        # ja_np = np.array(self.proc_dataset["data/motion_status_measured_joint_position"])
+        # d_act = np.diff(ja_np, axis=0)
+        # d_act_mag = np.linalg.norm(d_act, axis=-1)
+        # d_act_zero = np.linalg.norm(d_act, axis=-1) < 1e-4
+        # both_act_zero = np.logical_and(d_cmd_zero, d_act_zero)
+        # print(f"Cmd stopped {d_cmd_zero.sum()} times, Act stopped {d_act_zero.sum()} times, both stopped {both_act_zero.sum()} times")
+        
+        # # Create time series plot with color coding
+        # import matplotlib.pyplot as plt
+        
+        # time_indices = np.arange(len(d_cmd_mag))
+        
+        # plt.figure(figsize=(12, 8))
+        
+        # # Plot command magnitude with color coding for d_cmd_zero
+        # cmd_colors = ['darkblue' if not zero else 'lightblue' for zero in d_cmd_zero]
+        # for i in range(len(d_cmd_mag)):
+        #     plt.plot(time_indices[i:i+2], d_cmd_mag[i:i+2], color=cmd_colors[i], linewidth=1.5, alpha=0.8)
+        
+        # # Plot action magnitude with color coding for d_act_zero  
+        # act_colors = ['darkred' if not zero else 'lightcoral' for zero in d_act_zero]
+        # for i in range(len(d_act_mag)):
+        #     plt.plot(time_indices[i:i+2], d_act_mag[i:i+2], color=act_colors[i], linewidth=1.5, alpha=0.8)
+        
+        # # Create custom legend
+        # from matplotlib.lines import Line2D
+        # legend_elements = [
+        #     Line2D([0], [0], color='darkblue', lw=2, label='Command (moving)'),
+        #     Line2D([0], [0], color='lightblue', lw=2, label='Command (stopped)'),
+        #     Line2D([0], [0], color='darkred', lw=2, label='Action (moving)'),
+        #     Line2D([0], [0], color='lightcoral', lw=2, label='Action (stopped)')
+        # ]
+        # plt.legend(handles=legend_elements, loc='upper right')
+        
+        # plt.xlabel('Time Index', fontsize=12)
+        # plt.ylabel('Magnitude', fontsize=12)
+        # plt.title(f'Command vs Action Magnitude Over Time - Episode {self.current_ep_name}', fontsize=14)
+        # plt.grid(True, alpha=0.3)
+        
+        # # Save plot
+        # plot_dir = os.path.dirname(self.config.processed_path)
+        # os.makedirs(plot_dir, exist_ok=True)
+        # plot_path = os.path.join(plot_dir, f"cmd_vs_act_mag_timeseries_{self.current_ep_name}.png")
+        # plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        # plt.close()
+        # print(f"Saved plot to {plot_path}")
+
         self._add_vision()
         self._add_finger_specifics()
         self._add_wrench()
@@ -237,6 +294,9 @@ class BagPostProcessor():
         # Then save
         zarr_fname = self.train_zarr_fn if ep_i in self.train_epi else self.val_zarr_fn
         h5_fname = self.train_h5_fn if ep_i in self.train_epi else self.val_h5_fn
+
+        if ep_i in self.val_epi:
+            print(f"Saving {ep_name} as validation")
 
         # print(self.train_epi0, ep_i)
         if ep_i == self.train_epi0 or ep_i == self.val_epi0:   # TODO ugly :(
@@ -295,6 +355,8 @@ class BagPostProcessor():
                 self.tf_buffer_topics.extend([f"/{side}_arm/pose_static/" + k for k in zf[f"/{side}_arm/pose_static"].keys()])
             self.tf_buffer_reference_topics = ["/reference_pose/" + k for k in zf["/reference_pose"].keys()]
 
+        # print("Tracking topics:", self.tracked_topics)
+
     # finds the earliest time when at all tracked topics have published at least 1 msg
     def __find_earliest_valid_time(self):
         """
@@ -322,7 +384,7 @@ class BagPostProcessor():
         else:
             self.timestamps = list(range(evt, int(self.raw_dataset["/duration"][0]), int(self.freq * 1e9)))
         
-        print(f"Raw timestamps, from {self.timestamps[0]//1e9} to {self.timestamps[-1]//1e9}s, total {len(self.timestamps)}")
+        # print(f"Raw timestamps, from {self.timestamps[0]//1e9} to {self.timestamps[-1]//1e9}s, total {len(self.timestamps)}")
         self._filter_timestamps_for_chunk()
         self._filter_timestamps_for_plateau()
         # Add filtered timestamp to dataset
@@ -400,14 +462,19 @@ class BagPostProcessor():
         do_linear = bool(self.use_interpolation)
         
         # Get joint angles data
+        topic, value_topics = None, None
         for t, v in self.tracked_topics.items():
-            if "joint_angles" in t:
+            if "motion_status" in t:
                 topic, value_topics = t, v
                 break
+        if topic is None:
+            print("Warning: No motion_status topic found for plateau filtering")
+            return
         ts_arr = np.asarray(self.raw_dataset[topic + "/timestamp"])
-        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics)
-        if "data/joint_angles_data" in rtn_dict:
-            joint_angles = np.array(rtn_dict["data/joint_angles_data"])
+        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics, 
+                                                  validate_timestamps=True, timestamp_tolerance=0.1)
+        if "data/motion_status_measured_joint_position" in rtn_dict:
+            joint_angles = np.array(rtn_dict["data/motion_status_measured_joint_position"])
 
         # Create a temporary processed dataset to get gripper data
         temp_proc_dataset = {}
@@ -418,7 +485,8 @@ class BagPostProcessor():
                 topic, value_topics = t, v
                 break
         ts_arr = np.asarray(self.raw_dataset[topic + "/timestamp"])
-        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics)
+        rtn_dict = self._interpolate_other_values(topic, ts_arr, ts_all, do_linear, value_topics,
+                                                  validate_timestamps=True, timestamp_tolerance=0.1)
         temp_proc_dataset = rtn_dict
         
         # Extract gripper request data from the temporary dataset
@@ -438,23 +506,29 @@ class BagPostProcessor():
         
         # Create timestamp mask array (1 = keep, 0 = remove)
         mask = np.ones(len(self.timestamps), dtype=bool)
-        tolerance = 1e-5
+        tolerance = 1e-4
+
+        # Vectorize
+        joint_change = np.linalg.norm(np.diff(joint_angles, axis=0), axis=-1) > tolerance
+        gripper_change = np.linalg.norm(np.diff(gripper_requests, axis=0), axis=-1) > tolerance
+        any_change = np.logical_or(joint_change, gripper_change)
+        mask[1:] = any_change  # First timestamp always kept
         
-        # Compare each timestamp with the previous one
-        for i in range(1, len(self.timestamps)):
-            # Check if joint angles haven't changed
-            joint_unchanged = np.allclose(joint_angles[i], joint_angles[i-1], atol=tolerance)
-            gripper_unchanged = np.allclose(gripper_requests[i], gripper_requests[i-1], atol=tolerance)
+        # # Compare each timestamp with the previous one
+        # for i in range(1, len(self.timestamps)):
+        #     # Check if joint angles haven't changed
+        #     joint_unchanged = np.allclose(joint_angles[i], joint_angles[i-1], atol=tolerance)
+        #     gripper_unchanged = np.allclose(gripper_requests[i], gripper_requests[i-1], atol=tolerance)
             
-            # If both haven't changed, mark for removal
-            if joint_unchanged and gripper_unchanged:
-                mask[i] = False
+        #     # If both haven't changed, mark for removal
+        #     if joint_unchanged and gripper_unchanged:
+        #         mask[i] = False
         
         # Update timestamps to keep only non-plateau points
         original_count = len(self.timestamps)
         self.timestamps = [self.timestamps[i] for i in range(len(self.timestamps)) if mask[i]]
         filtered_count = len(self.timestamps)
-        print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
+        # print(f"Filtered {original_count - filtered_count} plateau timestamps, kept {filtered_count}")               
 
     # returns the topics we want to track in the final dataset
     def __get_tf_topics(self, side: str):
@@ -483,25 +557,31 @@ class BagPostProcessor():
         
         # key = "/right_arm/pose/" + key
         # print("tkey", key)
-
+        max_dt = 0.0
         for i in range(len(self.raw_dataset[key + "/timestamp"])):
             frame_id = str(self.raw_dataset[key + "/parent_frame_id"][0])         
             child_frame_id = str(self.raw_dataset[key + "/child_frame_id"][0])
             # print(frame_id, child_frame_id)           
             stamp = self.raw_dataset[key + "/timestamp"][i]
+            if i > 0:
+                dt = (stamp - self.raw_dataset[key + "/timestamp"][i-1]) / 1e9
+                max_dt = max(max_dt, dt)
             translation = self.raw_dataset[key + "/translation"][i]
             rotation = self.raw_dataset[key + "/rotation"][i]
             tr = np_arrs_to_tf_transform(
                 frame_id,
                 child_frame_id,
                 stamp,
-                translation, 
+                translation,
                 rotation
             )
             if "static" in key or "reference" in key:
                 self.buffer.set_transform_static(tr, "default_authority")
             else:
                 self.buffer.set_transform(tr, "default_authority")
+
+        # if max_dt > 0.05:
+        #     print(f"  Registered TF topic {key}, max dt {max_dt:.3f}s")
 
     # fill the buffer with the available transforms (to use for interpolation)
     def _register_transform_buffer(self):
@@ -596,6 +676,37 @@ class BagPostProcessor():
         - returns: (M, ...)  matching y’s trailing dims
         """
         low_i, high_i, mask_left, mask_right = self._compute_bounds(ts_arr, targets)
+        
+        # # Timestamp validation
+        # if validate_timestamps:
+        #     # Convert nanoseconds to seconds for comparison
+        #     ts_arr_sec = ts_arr / 1e9 if np.max(ts_arr) > 1e10 else ts_arr
+        #     targets_sec = targets / 1e9 if np.max(targets) > 1e10 else targets
+            
+        #     # Check differences between target timestamps and closest available timestamps
+        #     closest_ts = ts_arr_sec[low_i]
+        #     time_diffs = np.abs(targets_sec - closest_ts)
+            
+        #     # Find mismatched timestamps
+        #     large_diffs = time_diffs > timestamp_tolerance
+            
+        #     if np.any(large_diffs):
+        #         num_mismatched = np.sum(large_diffs)
+        #         max_diff = np.max(time_diffs[large_diffs])
+                
+        #         if warn_on_mismatch:
+        #             print(f"Warning: {num_mismatched}/{len(targets)} timestamps differ by more than {timestamp_tolerance}s")
+        #             print(f"Maximum difference: {max_diff:.3f}s")
+                    
+        #             # Show some examples of problematic timestamps
+        #             mismatch_indices = np.where(large_diffs)[0][:5]  # Show first 5
+        #             for idx in mismatch_indices:
+        #                 target_time = targets_sec[idx]
+        #                 closest_time = closest_ts[idx]
+        #                 diff = time_diffs[idx]
+        #                 print(f"  Target: {target_time:.3f}s, Closest: {closest_time:.3f}s, Diff: {diff:.3f}s")
+        #             raise Exception("Timestamp validation failed due to large mismatches.")
+        
         y_low = y[low_i]
         if mode == "left":
             out = y_low.copy()
@@ -632,7 +743,8 @@ class BagPostProcessor():
 
         return out
 
-    def _interpolate_other_values(self, topic, ts_arr, ts_all, do_linear, value_topics):
+    def _interpolate_other_values(self, topic, ts_arr, ts_all, do_linear, value_topics,
+                                  validate_timestamps=False, timestamp_tolerance=0.1, warn_on_mismatch=True):
         """
         Compute interpolated or not,
         used by both regular processing AND plateau removal
@@ -651,6 +763,9 @@ class BagPostProcessor():
                 mode=mode,
                 left_policy="first",
                 right_policy="last",
+                validate_timestamps=validate_timestamps,
+                timestamp_tolerance=timestamp_tolerance,
+                warn_on_mismatch=warn_on_mismatch,
             )
             rtn[s_key] = [row for row in out]
         return rtn
@@ -669,6 +784,10 @@ class BagPostProcessor():
             # Add to dict
             for s_key, out in rtn_dict.items():
                 self.proc_dataset[s_key] = out
+
+            max_dt = np.max(np.diff(ts_arr)) / 1e9 if len(ts_arr) > 1 else 0.0
+            # if max_dt > 0.05:
+            #     print(f"  Interpolated topic {topic}, max dt {max_dt:.3f}s")
 
     def _process_pc(self, pc):
         """
@@ -954,7 +1073,7 @@ class BagPostProcessor():
                 print(f"Failed to open video writer for {video_path}")
                 return
                 
-            print(f"Exporting video for episode {self.current_ep_name} with {len(images)} frames at {fps} Hz")
+            # print(f"Exporting video for episode {self.current_ep_name} with {len(images)} frames at {fps} Hz")
             
             # Write frames to video
             for i, img in enumerate(images):
@@ -975,7 +1094,7 @@ class BagPostProcessor():
                 
             # Release the video writer
             out.release()
-            print(f"Video exported successfully: {video_path}")
+            # print(f"Video exported successfully: {video_path}")
             
         except Exception as e:
             print(f"Error exporting video for episode {self.current_ep_name}: {e}")
@@ -990,12 +1109,10 @@ class BagPostProcessor():
                     os.remove(video_path)
             except Exception:
                 pass
-        
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "A post-processor script to take the raw dataset and create a processed dataset for training a Diffusion Policy model")
-    parser.add_argument("-c", "--config", help = "path to the config file", required = False, default="/home/houhd/datasets/robotool_configs/0903_newcalib_95split_second_half.yaml")
+    parser.add_argument("-c", "--config", help = "path to the config file", required = False, default="/home/houhd/datasets/robotool_configs/09_07_cap_replay52_138_screw_on.yaml")
     argument = parser.parse_args()
 
     proc_config = BagProcessorConfig()
