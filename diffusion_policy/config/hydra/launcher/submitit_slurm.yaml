@@ -1,0 +1,46 @@
+# Hydra SLURM Launcher Configuration
+# This file configures the submitit plugin to launch jobs on a SLURM cluster
+
+defaults:
+  - override /hydra/launcher: submitit_slurm
+
+hydra:
+  launcher:
+    # SLURM-specific parameters
+    submitit_folder: ${hydra.sweep.dir}/.submitit/%j  # Location for submitit logs
+    timeout_min: 240  # Job timeout in minutes (4 hours)
+    cpus_per_task: 8  # Number of CPUs per task
+    gpus_per_node: 1  # Number of GPUs per node
+    tasks_per_node: 1  # Number of tasks per node (usually 1 for single-GPU jobs)
+    mem_gb: 32  # Memory in GB
+    nodes: 1  # Number of nodes
+    name: ${hydra.job.name}  # Job name (automatically set by Hydra)
+
+    # SLURM partition and QoS
+    partition: null  # SLURM partition (e.g., 'gpu', 'compute'). Set to null for default partition
+    qos: null  # Quality of Service. Set to null for default QoS
+    account: null  # SLURM account for billing. Set to null if not needed
+
+    # GPU configuration (uncomment and modify as needed)
+    # constraint: "volta"  # GPU type constraint (e.g., 'volta', 'ampere')
+    # gres: "gpu:1"  # Generic resources (alternative to gpus_per_node)
+
+    # Advanced options
+    array_parallelism: 256  # Max number of parallel array jobs
+    max_num_timeout: 0  # Number of times to requeue job on timeout (0 = no requeue)
+
+    # Additional SLURM parameters (use #SBATCH format without the #SBATCH)
+    # additional_parameters:
+    #   mail-user: "your.email@example.com"
+    #   mail-type: "BEGIN,END,FAIL"
+    #   exclude: "node001,node002"  # Exclude specific nodes
+
+    # Setup commands to run before srun (e.g., module load, conda activate)
+    setup:
+      - "export PYTHONUNBUFFERED=1"  # Ensure Python output is unbuffered
+      # - "module load cuda/11.8"  # Example: load CUDA module
+      # - "source activate your_env"  # Example: activate conda environment
+
+  sweep:
+    dir: data/outputs/slurm_sweep_${now:%Y.%m.%d}/${now:%H.%M.%S}_${hydra.job.name}
+    subdir: ${hydra.job.num}  # Each job gets its own subdirectory

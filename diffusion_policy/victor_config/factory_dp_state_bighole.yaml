@@ -116,18 +116,18 @@ shape_meta:
       type: low_dim
 task:
   dataset:
-    _target_: diffusion_policy.dataset.factory_dataset.FactoryH5Dataset
+    _target_: diffusion_policy.dataset.factory_dataset.FactoryDataset
     horizon: 8
-    # max_train_episodes: 100
-    # pad_after: 0
-    # pad_before: 0
-    # seed: 42
-    # val_ratio: 0.3  # TODO experiment
-    # zarr_path: data/victor/victor_data_07_29_all_ep_ea.zarr # TODO not using the wrench data
-    h5_dir: /home/houhd/force_tool/raw_datasets/1019_peg_insert_bighole
-    max_train_episodes: 3000
-    max_val_episodes: 300
-    preload: true
+    max_train_episodes: 100
+    pad_after: 0
+    pad_before: 0
+    seed: 42
+    val_ratio: 0.3  # TODO experiment
+    zarr_path: ../force_tool/raw_datasets/1019_peg_insert_bighole/training.zarr.zip # TODO not using the wrench data # TODO not using the wrench data
+    # h5_dir: /home/houhd/force_tool/raw_datasets/1019_peg_insert_bighole
+    # max_train_episodes: 3000
+    # max_val_episodes: 300
+    # preload: true
   name: peg-insert
   shape_meta:
     action:
@@ -157,7 +157,7 @@ training:
   use_ema: true
   val_every: 5
 val_dataloader:
-  batch_size: 32
+  batch_size: 1024
   num_workers: 4
   persistent_workers: false
   pin_memory: true

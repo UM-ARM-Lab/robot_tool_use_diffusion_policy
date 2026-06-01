@@ -1,207 +1,158 @@
+from typing import Dict
 import torch
 import numpy as np
-
-import glob
-import h5py
-from tqdm import tqdm
-
+import copy
+import zarr
+from diffusion_policy.common.pytorch_util import dict_apply
+from diffusion_policy.common.replay_buffer import ReplayBuffer
+from diffusion_policy.common.sampler import (
+    SequenceSampler, get_val_mask, downsample_mask)
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
+from diffusion_policy.common.normalize_util import get_image_range_normalizer
+from diffusion_policy.codecs.imagecodecs_numcodecs import Jpeg2k, register_codecs, Blosc2, Jpeg
 
-class FactoryH5Dataset(BaseImageDataset):
-    """
-    Dataset loader for 1019_peg_insert_bighole HDF5 format
-    Compatible with victor_dp diffusion policy training
-    """
+register_codecs()
+
+class FactoryDataset(BaseImageDataset):
     def __init__(self,
-        h5_dir,
-        split='training',
-        horizon=16,
-        pad_before=1,
-        pad_after=7,
-        use_point_cloud=False,
-        use_wrench=False,
-        max_train_episodes=None,
-        max_val_episodes=None,
-        seed=42,
-        preload=True
+        zarr_path, 
+        horizon=1,
+        pad_before=0,
+        pad_after=0,
+        seed=0,
+        val_ratio=0.0,
+        max_train_episodes=None
     ):
-
+        
         super().__init__()
+        self.store = zarr.MemoryStore()
 
-        # Load all h5 file paths from the specified split directory
-        h5_paths = sorted(glob.glob(f"{h5_dir}/{split}/*.h5"))
+        # compressor_map = {
+        #     "robot_act" : Blosc2(),
+        #     "robot_obs" : Blosc2(),
+        #     "image"     : Jpeg2k(level=50)
+        # }
 
-        if len(h5_paths) == 0:
-            raise ValueError(f"No H5 files found in {h5_dir}/{split}/")
+        # chunk_map = {
+        #     "robot_act" : (100, 11),
+        #     "robot_obs" : (100, 21),
+        #     "image"     : (10, 512, 512, 4)
+        # }
 
-        # Determine number of episodes per file and episode length from first file
-        with h5py.File(h5_paths[0], 'r') as f:
-            self.episodes_per_file = f['action'].shape[0]
-            self.episode_length = f['action'].shape[1]
+        # self.replay_buffer = ReplayBuffer.copy_from_path(
+        #     zarr_path, keys=["robot_act", "robot_obs", 'image'],
+        #     # chunks=chunk_map,
+        #     store=self.store,)
+        #     # compressors=compressor_map)
 
-        print(f"Detected {self.episodes_per_file} episodes per file, {self.episode_length} timesteps per episode")
+        self.replay_buffer = ReplayBuffer.copy_from_path(
+            zarr_path, keys=["action", "low_dim_state"]
+        )
+        print(self.replay_buffer.keys())
+        print(f"Loaded replay buffer with {self.replay_buffer}")
 
-        # Build episode index: (file_path, ep_idx_in_file)
-        all_episodes = []
-        for h5_path in h5_paths:
-            for ep_in_file in range(self.episodes_per_file):
-                all_episodes.append((h5_path, ep_in_file))
+        # Get the mask for validation episodes
+        val_mask = get_val_mask(
+            n_episodes=self.replay_buffer.n_episodes, 
+            val_ratio=val_ratio,
+            seed=seed
+        )
+        print("VALIDATION MASK:", val_mask)
+        train_mask = ~val_mask 
+        # train_mask = downsample_mask(
+        #     mask=train_mask, 
+        #     max_n=max_train_episodes, 
+        #     seed=seed)
 
-        print(f"Total available episodes: {len(all_episodes)}")
-
-        # Randomly sample episodes if max_episodes is specified
-        max_episodes = max_train_episodes if split == 'training' else max_val_episodes
-        if max_episodes is not None and max_episodes < len(all_episodes):
-            rng = np.random.RandomState(seed)
-            sampled_indices = rng.choice(len(all_episodes), size=max_episodes, replace=False)
-            self.episodes = [all_episodes[i] for i in sampled_indices]
-            print(f"Randomly sampled {len(self.episodes)} episodes from {len(all_episodes)} available")
-        else:
-            self.episodes = all_episodes
-            print(f"Using all {len(self.episodes)} episodes")
-
-        self.h5_dir = h5_dir
-        self.split = split
+        self.sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer, 
+            sequence_length=horizon,
+            pad_before=pad_before, 
+            pad_after=pad_after,
+            episode_mask=train_mask
+        )
+        self.train_mask = train_mask
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
-        self.use_point_cloud = use_point_cloud
-        self.use_wrench = use_wrench
-        self.max_train_episodes = max_train_episodes
-        self.max_val_episodes = max_val_episodes
-        self.seed = seed
-        self.preload = preload
 
-        # Pre-load all data into memory if requested
-        self.preloaded_data = None
-        if self.preload:
-            print(f"Pre-loading all {len(self.episodes)} episodes into memory...")
-            self.preloaded_data = {}
-            for ep_global_idx, (h5_path, ep_idx) in enumerate(tqdm(self.episodes, desc="Loading episodes")):
-                # Load episode data
-                with h5py.File(h5_path, 'r') as f:
-                    data = {
-                        'robot_act': f['action'][ep_idx].astype('f4'),
-                        'robot_obs': f['low_dim_state'][ep_idx].astype('f4'),
-                    }
-                    if self.use_wrench:
-                        data['wrench'] = f['wrench'][ep_idx].astype('f4')
-                        data['tool_pose'] = f['tool_pose'][ep_idx].astype('f4')
-                    if self.use_point_cloud:
-                        data['partial_pc'] = f['partial_pc'][ep_idx].astype('f4')
-
-                # Store in memory using global episode index
-                self.preloaded_data[ep_global_idx] = data
-            print(f"Pre-loading complete! All data loaded into memory.")
-
-        # Cache for frequently accessed h5 files (only used if preload=False)
-        self.h5_cache = {}
-        self.max_cache_size = 10
+        print("HORIZON:", self.horizon)
 
     def get_validation_dataset(self):
-        """Create validation dataset by loading from the 'validation' split directory"""
-        val_set = FactoryH5Dataset(
-            h5_dir=self.h5_dir,
-            split='validation',
-            horizon=self.horizon,
-            pad_before=self.pad_before,
+        val_set = copy.copy(self)
+        val_set.sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer, 
+            sequence_length=self.horizon,
+            pad_before=self.pad_before, 
             pad_after=self.pad_after,
-            use_point_cloud=self.use_point_cloud,
-            use_wrench=self.use_wrench,
-            max_train_episodes=self.max_train_episodes,
-            max_val_episodes=self.max_val_episodes,
-            seed=self.seed,
-            preload=self.preload
+            episode_mask=~self.train_mask
         )
+        val_set.train_mask = ~self.train_mask
         return val_set
 
-    def _load_episode(self, ep_global_idx, h5_path=None, ep_idx=None):
-        """Load single episode from memory or h5 file with caching
-
-        Args:
-            ep_global_idx: Global episode index in self.episodes list
-            h5_path: H5 file path (only used if not preloaded)
-            ep_idx: Episode index within H5 file (only used if not preloaded)
-        """
-        # If data is preloaded, return from memory
-        if self.preload:
-            return self.preloaded_data[ep_global_idx]
-
-        # Otherwise, load from H5 file with caching
-        if h5_path not in self.h5_cache:
-            if len(self.h5_cache) >= self.max_cache_size:
-                # Remove oldest
-                self.h5_cache.pop(next(iter(self.h5_cache)))
-            self.h5_cache[h5_path] = h5py.File(h5_path, 'r')
-
-        f = self.h5_cache[h5_path]
-
-        data = {
-            'robot_act': f['action'][ep_idx].astype('f4'),
-            'robot_obs': f['low_dim_state'][ep_idx].astype('f4'),
-        }
-
-        if self.use_wrench:
-            data['wrench'] = f['wrench'][ep_idx].astype('f4')
-            data['tool_pose'] = f['tool_pose'][ep_idx].astype('f4')
-
-        if self.use_point_cloud:
-            data['partial_pc'] = f['partial_pc'][ep_idx].astype('f4')
-
-        return data
-
     def get_normalizer(self, mode='limits', **kwargs):
-        """Compute normalizer statistics"""
-        # Sample subset for stats
-        sample_size = min(1000, len(self.episodes))
-        sample_indices = np.random.choice(len(self.episodes), sample_size, replace=False)
-
-        all_acts = []
-        all_obs = []
-
-        for idx in tqdm(sample_indices, desc="Computing normalizer"):
-            h5_path, ep_idx = self.episodes[idx]
-            data = self._load_episode(ep_global_idx=idx, h5_path=h5_path, ep_idx=ep_idx)
-            all_acts.append(data['robot_act'])
-            all_obs.append(data['robot_obs'])
-
+        data = {
+            'action': self.replay_buffer['action'],
+            'robot_obs': self.replay_buffer['low_dim_state']
+            # NOTE for future reference: original grabs the first 2 columns, which correspond to agent_x, agent_y
+            # 'wrench': self.replay_buffer['wrench'],#[...,:2]
+            # 'gripper_status': self.replay_buffer['gripper_status']
+        }
         normalizer = LinearNormalizer()
-        normalizer.fit({
-            'action': np.array(all_acts),
-            'robot_obs': np.array(all_obs)
-        }, last_n_dims=1, mode=mode, **kwargs)
+        normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)   # TODO unsure about keeping last_n_dims the same
+        # normalizer['image'] = get_image_range_normalizer()  # TODO unsure?
 
         return normalizer
 
-    def __len__(self):
-        # Number of valid windows per episode
-        return len(self.episodes) * (self.episode_length - self.horizon + 1)
+    def __len__(self) -> int:
+        return len(self.sampler)
 
-    def __getitem__(self, idx):
-        """Sample a sequence"""
-        ep_len = self.episode_length - self.horizon + 1
-        ep_idx = idx // ep_len
-        start_t = idx % ep_len
-        end_t = start_t + self.horizon
-
-        h5_path, ep_in_file = self.episodes[ep_idx]
-        data = self._load_episode(ep_global_idx=ep_idx, h5_path=h5_path, ep_idx=ep_in_file)
-
-        # Extract sequence
-        result = {
+    def _sample_to_data(self, sample):
+        # agent_pos = sample['state'][:,:].astype(np.float32) # (agent_posx2, block_posex3)
+        # motion_status = sample['action'].astype(np.float32)
+        # wrench = sample['wrench'].astype(np.float32)
+        # gripper_status = sample['gripper_status'].astype(np.float32)
+        # image = np.moveaxis(sample['image'],-1,1)/255   # unsure what this does, but everything breaks without it
+        # image = sample['image'] / 255
+        robot_act = sample['action'].astype(np.float32)
+        robot_obs = sample['low_dim_state'].astype(np.float32)
+    
+        data = {
             'obs': {
-                'robot_obs': torch.from_numpy(data['robot_obs'][start_t:end_t])
+                # 'image': image, # T, 3, 96, 96
+                'robot_obs'  : robot_obs        # T, 19
+                # 'action': action, # T, 7
+                # 'gripper_status': gripper_status, # T, 3 # TODO ???
+                # 'wrench': wrench # T, 6
             },
-            'action': torch.from_numpy(data['robot_act'][start_t:end_t])
+            'action': robot_act # T, 6    # TODO should probably include the gripper status too ? and the gripper?
         }
+        return data
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        sample = self.sampler.sample_sequence(idx)
+        data = self._sample_to_data(sample)
+        torch_data = dict_apply(data, torch.from_numpy)
+        return torch_data
 
-        if self.use_wrench:
-            result['obs']['wrench'] = torch.from_numpy(data['wrench'][start_t:end_t])
-            result['obs']['tool_pose'] = torch.from_numpy(data['tool_pose'][start_t:end_t])
 
-        if self.use_point_cloud:
-            pc = data['partial_pc'][start_t:end_t]  # (T, 1024, 3)
-            result['obs']['point_cloud'] = torch.from_numpy(pc)
+def test():
+    # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr')
+    zarr_path = os.path.expanduser('~/code/force_tool/raw_datasets/1019_peg_insert_bighole/debug.zarr.zip')
+    # zarr_path = os.path.expanduser('~/robot_tool_use_diffusion_policy/data/victor/victor_data.zarr/ds_processed.zarr.zip')
+    dataset = FactoryDataset(zarr_path, horizon=1)
+    # print(dataset.replay_buffer.data)
+    print(dataset.__getitem__(0))
+    # print(dataset.replay_buffer.episode_ends[:])
+    # print(dataset.replay_buffer.n_episodes)
+    dataset.get_normalizer()
+    # from matplotlib import pyplot as plt
+    # normalizer = dataset.get_normalizer()
+    # nactions = normalizer['action'].normalize(dataset.replay_buffer['action'])
+    # diff = np.diff(nactions, axis=0)
+    # dists = np.linalg.norm(np.diff(nactions, axis=0), axis=-1)
 
-        return result
+if __name__ == "__main__":
+    import os
+    test()

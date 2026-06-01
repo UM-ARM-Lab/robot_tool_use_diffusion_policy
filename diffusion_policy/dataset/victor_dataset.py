@@ -84,7 +84,7 @@ class VictorDataset(BaseImageDataset):
             pad_before=self.pad_before, 
             pad_after=self.pad_after,
             episode_mask=~self.train_mask
-            )
+        )
         val_set.train_mask = ~self.train_mask
         return val_set
 
